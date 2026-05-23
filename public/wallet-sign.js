@@ -34,6 +34,7 @@ if (provider?.on) {
 }
 
 updateWalletStatus();
+hydrateFromUrlParams();
 
 function getProvider() {
   if (!window.ethereum) return null;
@@ -45,6 +46,27 @@ function getProvider() {
     );
   }
   return window.ethereum;
+}
+
+function hydrateFromUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  const method = params.get("method");
+  const challenge =
+    params.get("challenge") || params.get("message") || params.get("typedData");
+  const source = params.get("source");
+
+  if (method && [...methodSelect.options].some((option) => option.value === method)) {
+    methodSelect.value = method;
+  }
+  if (challenge) {
+    challengeInput.value = challenge;
+    output.textContent = [
+      source ? `Challenge loaded for ${source}.` : "Challenge loaded from URL.",
+      "Connect the target wallet, switch to Base if needed, then sign.",
+      "Copy the resulting JSON back to Codex.",
+    ].join("\n");
+    setStatus("Challenge loaded from URL.");
+  }
 }
 
 async function connectWallet() {

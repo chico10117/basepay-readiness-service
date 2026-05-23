@@ -54,7 +54,7 @@ app.use(express.json({ limit: "64kb" }));
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.7.0",
+  version: "0.7.1",
   description:
     "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
