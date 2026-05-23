@@ -76,6 +76,8 @@ the data feeds without query-string construction.
 The wallet signer at `/wallet-sign` is a client-side helper for producing
 `personal_sign` or `eth_signTypedData_v4` payloads from the published Base
 receiving wallet. It does not post messages or signatures back to the server.
+It supports URL prefill parameters for phone workflows:
+`/wallet-sign?method=personal_sign&source=BountyBook&challenge=...`.
 
 ## Local Run
 
