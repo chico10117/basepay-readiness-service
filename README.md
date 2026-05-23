@@ -27,6 +27,7 @@ GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/market/crypto-snapshot?limit=50
 POST /api/market/ohlcv
 POST /api/market/crypto-snapshot
+GET /wallet-sign
 ```
 
 Default price:
@@ -71,6 +72,10 @@ turning on API-key access.
 The POST wrappers accept JSON bodies such as `{"limit": 50}` or
 `{"pairs": ["BTC-USD", "ETH-USD"], "days": 365}` so marketplace probes can call
 the data feeds without query-string construction.
+
+The wallet signer at `/wallet-sign` is a client-side helper for producing
+`personal_sign` or `eth_signTypedData_v4` payloads from the published Base
+receiving wallet. It does not post messages or signatures back to the server.
 
 ## Local Run
 

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wallet Signer | Agent Commerce Desk</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell signing-shell">
+      <section class="workbench" aria-labelledby="title">
+        <div class="headline">
+          <p class="kicker">Base wallet auth</p>
+          <h1 id="title">Wallet Signer</h1>
+          <p class="dek">
+            Produce task-board signatures from the published receiving wallet
+            without sending private keys or signature payloads to this server.
+          </p>
+        </div>
+
+        <section class="problem" aria-label="Wallet status">
+          <div>
+            <p class="section-label">Target</p>
+            <p class="wallet-address">0xb19262185bac9748e2b71674Ef48676448F7A516</p>
+          </div>
+          <div>
+            <p class="section-label">Connected</p>
+            <p id="connected-address">Not connected</p>
+          </div>
+          <div>
+            <p class="section-label">Network</p>
+            <p id="chain-status">Waiting for wallet</p>
+          </div>
+        </section>
+
+        <section class="signer-grid" aria-label="Wallet signature workbench">
+          <form class="checker signer-form" id="signer">
+            <div class="button-row">
+              <button type="button" id="connect-wallet">Connect</button>
+              <button type="button" class="secondary-button" id="switch-base">
+                Base
+              </button>
+            </div>
+
+            <label for="sign-method">Signature method</label>
+            <select id="sign-method" name="method">
+              <option value="personal_sign">personal_sign</option>
+              <option value="eth_signTypedData_v4">eth_signTypedData_v4</option>
+            </select>
+
+            <label for="challenge">Challenge or typed data JSON</label>
+            <textarea
+              id="challenge"
+              name="challenge"
+              spellcheck="false"
+              autocomplete="off"
+              rows="12"
+              placeholder="Paste the task-board challenge here"
+            ></textarea>
+
+            <div class="button-row">
+              <button type="submit" id="sign-button">Sign</button>
+              <button type="button" class="secondary-button" id="copy-output">
+                Copy
+              </button>
+            </div>
+          </form>
+
+          <section class="result signer-result" aria-live="polite">
+            <div class="status-line">
+              <span class="status-dot"></span>
+              <span id="signer-status">Ready</span>
+            </div>
+            <pre id="signature-output">Connect the target wallet to start.</pre>
+          </section>
+        </section>
+      </section>
+
+      <aside class="ledger" aria-label="Signing details">
+        <a class="order-link" href="/">Agent Commerce Desk</a>
+
+        <div class="receipt">
+          <p>Client-side only</p>
+          <span>No message, signature, or wallet token is posted back to this server.</span>
+        </div>
+
+        <div class="receipt">
+          <p>Expected wallet</p>
+          <code>0xb19262185bac9748e2b71674Ef48676448F7A516</code>
+        </div>
+
+        <div class="receipt">
+          <p>Expected chain</p>
+          <span>Base mainnet, chain ID 8453.</span>
+        </div>
+
+        <div class="receipt">
+          <p>Safety</p>
+          <span>Only sign challenges from task boards you trust and intend to use.</span>
+        </div>
+      </aside>
+    </main>
+    <script src="/wallet-sign.js"></script>
+  </body>
+</html>

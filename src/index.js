@@ -54,7 +54,7 @@ app.use(express.json({ limit: "64kb" }));
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.6.0",
+  version: "0.7.0",
   description:
     "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -76,6 +76,7 @@ const serviceInfo = {
       "GET /api/market/crypto-snapshot?limit=50",
       "POST /api/market/ohlcv",
       "POST /api/market/crypto-snapshot",
+      "GET /wallet-sign",
     ],
     paid: [
       "GET /api/readiness?address=0x...",
@@ -148,6 +149,9 @@ const serviceInfo = {
       ],
     },
   ],
+  tools: {
+    walletSignatureHelper: "/wallet-sign",
+  },
 };
 
 app.get("/health", (_req, res) => {
@@ -323,6 +327,27 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
           },
         },
       },
+      {
+        name: "target_wallet_signature_helper",
+        endpoint: "/wallet-sign",
+        method: "GET",
+        payment: {
+          mode: "free",
+          settlement: "client-side wallet signature only",
+          payTo: PAY_TO,
+        },
+        endpointUrl: "/wallet-sign",
+        inputSchema: {
+          type: "object",
+          properties: {
+            challenge: {
+              type: "string",
+              description:
+                "A task-board challenge or typed-data JSON to sign from the connected wallet.",
+            },
+          },
+        },
+      },
     ],
   });
 });
@@ -390,10 +415,22 @@ app.get("/.well-known/agent.json", (_req, res) => {
         uri: "/api/market/crypto-snapshot",
         method: "POST",
       },
+      {
+        id: "target-wallet-signature-helper",
+        name: "Target Wallet Signature Helper",
+        description:
+          "Client-side wallet page for producing personal_sign or typed-data signatures from the published Base receiving wallet.",
+        uri: "/wallet-sign",
+        method: "GET",
+      },
     ],
     payment: paymentInfo(),
     x402: x402Info("/api/readiness/0xb19262185bac9748e2b71674Ef48676448F7A516"),
   });
+});
+
+app.get("/wallet-sign", (_req, res) => {
+  res.sendFile(join(PUBLIC_DIR, "wallet-sign.html"));
 });
 
 app.use(express.static(PUBLIC_DIR));
@@ -1057,6 +1094,12 @@ function agentIdentity() {
         transport: "https",
         payment: "x402",
         endpoint: `${baseUrl()}/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516`,
+      },
+      {
+        name: "Target wallet signature helper",
+        transport: "https",
+        payment: "free",
+        endpoint: `${baseUrl()}/wallet-sign`,
       },
     ],
     supportedTrust: ["erc-8004", "x402", "base-usdc"],
