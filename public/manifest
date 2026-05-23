@@ -1,34 +1,39 @@
 {
   "name": "Agent Commerce Desk",
   "version": "0.3.0",
-  "description": "Checks whether a Base wallet is safe and ready to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
+  "description": "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
   "payTo": "0xb19262185bac9748e2b71674Ef48676448F7A516",
   "acceptedPayment": {
     "asset": "native USDC",
+    "assetContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     "network": "Base",
     "networkCaip2": "eip155:8453",
-    "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "price": "$2",
     "facilitator": "https://facilitator.world.fun"
   },
   "endpoints": {
     "free": [
-      "GET /",
+      "GET /health",
       "GET /manifest",
       "GET /.well-known/agent-card.json",
       "GET /.well-known/agent.json",
+      "GET /api/800402/preview",
       "GET /api/preview?address=0x..."
     ],
-    "paidProof": [
+    "paid": [
       "GET /api/readiness?address=0x...",
-      "GET /api/agent-commerce-receipt?address=0x..."
+      "GET /api/readiness/:address",
+      "GET /api/agent-commerce-receipt?address=0x...",
+      "GET /api/agent-commerce-receipt/:address"
     ]
   },
   "x402": {
-    "endpoint": "https://x402-wallet-readiness-service.vercel.app/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
+    "endpoint": "https://x402-wallet-readiness-service.vercel.app/api/readiness/0xb19262185bac9748e2b71674Ef48676448F7A516",
     "method": "GET",
     "priceUsd": 2,
     "network": "eip155:8453",
     "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "facilitator": "https://facilitator.world.fun",
     "payTo": "0xb19262185bac9748e2b71674Ef48676448F7A516"
   },
   "problemSolved": [
