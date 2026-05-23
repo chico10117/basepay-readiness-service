@@ -23,6 +23,7 @@ GET /api/readiness?address=0x...
 GET /api/readiness/:address
 GET /api/agent-commerce-receipt?address=0x...
 GET /api/agent-commerce-receipt/:address
+GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 ```
 
 Default price:
@@ -54,6 +55,11 @@ The endpoint checks:
 - Contract-vs-EOA status
 - Blockscout reputation and token visibility
 
+The market-data endpoint returns daily OHLCV candles for supported Coinbase
+Exchange pairs (`BTC-USD`, `ETH-USD`, `SOL-USD`). It is cache-backed and can be
+locked behind `MARKET_FEED_API_KEY` for buyer delivery through `x-api-key` or a
+Bearer token.
+
 ## Local Run
 
 ```sh
@@ -74,6 +80,7 @@ curl http://localhost:4021/manifest
 curl http://localhost:4021/.well-known/agent-card.json
 curl http://localhost:4021/.well-known/agent.json
 curl http://localhost:4021/api/800402/preview
+curl 'http://localhost:4021/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
 ```
 
 The `agent-commerce-receipt` endpoint is the 800402 demo surface. It combines

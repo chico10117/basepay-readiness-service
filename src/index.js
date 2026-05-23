@@ -1,4 +1,5 @@
 import express from "express";
+import { timingSafeEqual } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { facilitator as coinbaseFacilitator } from "@coinbase/x402";
@@ -12,13 +13,19 @@ const PORT = Number(process.env.PORT ?? "4021");
 const NETWORK = process.env.X402_NETWORK ?? "eip155:8453";
 const PRICE = process.env.X402_PRICE ?? "$2";
 const BASE_RPC = process.env.BASE_RPC ?? "https://mainnet.base.org";
+const COINBASE_EXCHANGE_API =
+  process.env.COINBASE_EXCHANGE_API ?? "https://api.exchange.coinbase.com";
 const BLOCKSCOUT = process.env.BLOCKSCOUT ?? "https://base.blockscout.com";
 const USDC_CONTRACT =
   process.env.USDC_CONTRACT ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const MARKET_FEED_API_KEY = process.env.MARKET_FEED_API_KEY ?? "";
+const MARKET_CACHE_TTL_SECONDS = Number(process.env.MARKET_CACHE_TTL_SECONDS ?? "900");
 const FACILITATOR_URL =
   process.env.X402_FACILITATOR_URL ?? "https://facilitator.world.fun";
 const PUBLIC_URL = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL) : null;
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
+const MARKET_ALLOWED_PAIRS = new Set(["BTC-USD", "ETH-USD", "SOL-USD"]);
+const MARKET_CACHE = new Map();
 
 const facilitatorClient =
   process.env.X402_USE_CDP_FACILITATOR === "true"
@@ -43,7 +50,7 @@ app.use(express.json({ limit: "64kb" }));
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.3.0",
+  version: "0.4.0",
   description:
     "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -61,6 +68,7 @@ const serviceInfo = {
       "GET /manifest",
       "GET /.well-known/agent-card.json",
       "GET /api/800402/preview",
+      "GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
     ],
     paid: [
       "GET /api/readiness?address=0x...",
@@ -112,6 +120,16 @@ const serviceInfo = {
       priceUsd: 300,
       deliverables: ["test runner", "transcripts", "pass/fail checks", "deployment notes"],
     },
+    {
+      name: "Daily BTC/ETH OHLCV market data feed",
+      priceUsd: 100,
+      deliverables: [
+        "REST JSON endpoint",
+        "365 days of BTC/USD and ETH/USD daily candles",
+        "API-key option",
+        "cache and uptime notes",
+      ],
+    },
   ],
 };
 
@@ -146,6 +164,15 @@ app.get("/api/800402/preview", (_req, res) => {
         `${baseUrl()}/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516`,
     },
   });
+});
+
+app.get("/api/market/ohlcv", async (req, res, next) => {
+  try {
+    requireMarketApiKey(req);
+    res.json(await buildMarketOhlcvFeed(req.query));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/preview/:address", async (req, res, next) => {
@@ -206,6 +233,31 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
           },
         },
       },
+      {
+        name: "daily_crypto_ohlcv_feed",
+        endpoint: "/api/market/ohlcv",
+        method: "GET",
+        payment: {
+          mode: MARKET_FEED_API_KEY ? "api_key" : "demo_unlocked",
+          settlement: "USDC on Base by service agreement",
+          payTo: PAY_TO,
+        },
+        endpointUrl: "/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pairs: {
+              type: "string",
+              example: "BTC-USD,ETH-USD",
+            },
+            days: {
+              type: "integer",
+              minimum: 1,
+              maximum: 365,
+            },
+          },
+        },
+      },
     ],
   });
 });
@@ -247,6 +299,14 @@ app.get("/.well-known/agent.json", (_req, res) => {
           "Combines agent identity metadata, x402 Base USDC payment terms, and Base wallet-readiness evidence after an x402 payment.",
         uri:
           "/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516",
+        method: "GET",
+      },
+      {
+        id: "daily-crypto-ohlcv-feed",
+        name: "Daily BTC/ETH OHLCV Market Data Feed",
+        description:
+          "Cache-backed REST endpoint returning daily BTC/USD and ETH/USD OHLCV candles with optional API-key auth for buyer delivery.",
+        uri: "/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
         method: "GET",
       },
     ],
@@ -418,6 +478,180 @@ app.listen(PORT, () => {
   );
   console.log(`x402 network=${NETWORK} price=${PRICE} payTo=${PAY_TO}`);
 });
+
+function requireMarketApiKey(req) {
+  if (!MARKET_FEED_API_KEY) return;
+
+  const auth = String(req.headers.authorization ?? "");
+  const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : "";
+  const candidate = String(req.headers["x-api-key"] ?? bearer);
+
+  if (!constantTimeEqual(candidate, MARKET_FEED_API_KEY)) {
+    const error = new Error("valid market feed API key required");
+    error.statusCode = 401;
+    throw error;
+  }
+}
+
+function constantTimeEqual(candidate, expected) {
+  if (!candidate || candidate.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(candidate), Buffer.from(expected));
+}
+
+async function buildMarketOhlcvFeed(query) {
+  const days = parseDays(query.days);
+  const pairs = parsePairs(query.pairs);
+  const startedAt = Date.now();
+  const markets = await Promise.all(
+    pairs.map((pair) => getDailyMarketCandles(pair, days)),
+  );
+
+  return {
+    service: "Agent Commerce Desk Market Feed",
+    version: serviceInfo.version,
+    generatedAt: new Date().toISOString(),
+    source: "Coinbase Exchange public candles API",
+    auth: {
+      mode: MARKET_FEED_API_KEY ? "api_key_required" : "demo_unlocked",
+      acceptedHeaders: MARKET_FEED_API_KEY
+        ? ["x-api-key", "authorization: Bearer <token>"]
+        : [],
+    },
+    cache: {
+      ttlSeconds: MARKET_CACHE_TTL_SECONDS,
+      strategy: "in-memory per deployment instance",
+    },
+    request: {
+      pairs,
+      days,
+      granularity: "1d",
+    },
+    markets,
+    latencyMs: Date.now() - startedAt,
+  };
+}
+
+function parsePairs(rawPairs) {
+  const pairs = String(rawPairs || "BTC-USD,ETH-USD")
+    .split(",")
+    .map((pair) => pair.trim().toUpperCase().replace("/", "-"))
+    .filter(Boolean);
+
+  if (pairs.length === 0 || pairs.length > 5) {
+    const error = new Error("pairs must include between 1 and 5 symbols");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  for (const pair of pairs) {
+    if (!MARKET_ALLOWED_PAIRS.has(pair)) {
+      const error = new Error(
+        `unsupported pair ${pair}; supported pairs: ${[...MARKET_ALLOWED_PAIRS].join(", ")}`,
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+
+  return [...new Set(pairs)];
+}
+
+function parseDays(rawDays) {
+  const days = Number(rawDays || 365);
+  if (!Number.isInteger(days) || days < 1 || days > 365) {
+    const error = new Error("days must be an integer between 1 and 365");
+    error.statusCode = 400;
+    throw error;
+  }
+  return days;
+}
+
+async function getDailyMarketCandles(pair, days) {
+  const cacheKey = `${pair}:${days}`;
+  const now = Date.now();
+  const cached = MARKET_CACHE.get(cacheKey);
+  if (cached?.expiresAt > now) {
+    return { ...cached.value, cacheHit: true };
+  }
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const nowDate = new Date();
+  const endMs = Date.UTC(
+    nowDate.getUTCFullYear(),
+    nowDate.getUTCMonth(),
+    nowDate.getUTCDate(),
+  );
+  const startMs = endMs - days * dayMs;
+  const candles = await fetchCoinbaseDailyCandles(pair, startMs, endMs);
+  const [base, quote] = pair.split("-");
+  const value = {
+    pair,
+    base,
+    quote,
+    granularitySeconds: 86400,
+    daysRequested: days,
+    start: new Date(startMs).toISOString(),
+    endExclusive: new Date(endMs).toISOString(),
+    refreshedAt: new Date().toISOString(),
+    count: candles.length,
+    candles,
+  };
+
+  MARKET_CACHE.set(cacheKey, {
+    expiresAt: now + MARKET_CACHE_TTL_SECONDS * 1000,
+    value,
+  });
+
+  return { ...value, cacheHit: false };
+}
+
+async function fetchCoinbaseDailyCandles(pair, startMs, endMs) {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const maxChunkDays = 280;
+  const byTimestamp = new Map();
+
+  for (let cursor = startMs; cursor < endMs; cursor += maxChunkDays * dayMs) {
+    const chunkEnd = Math.min(cursor + maxChunkDays * dayMs, endMs);
+    const url = new URL(`/products/${pair}/candles`, COINBASE_EXCHANGE_API);
+    url.searchParams.set("granularity", "86400");
+    url.searchParams.set("start", new Date(cursor).toISOString());
+    url.searchParams.set("end", new Date(chunkEnd).toISOString());
+
+    const response = await fetch(url, {
+      headers: {
+        accept: "application/json",
+        "user-agent": "codex-agent-market-feed/0.1.0",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Coinbase candles request failed: ${response.status}`);
+    }
+
+    const rows = await response.json();
+    if (!Array.isArray(rows)) {
+      throw new Error("Coinbase candles response was not an array");
+    }
+
+    for (const row of rows) {
+      const [time, low, high, open, close, volume] = row;
+      const timeMs = Number(time) * 1000;
+      if (timeMs < startMs || timeMs >= endMs) continue;
+      byTimestamp.set(Number(time), {
+        timestamp: new Date(timeMs).toISOString(),
+        date: new Date(timeMs).toISOString().slice(0, 10),
+        open: Number(open),
+        high: Number(high),
+        low: Number(low),
+        close: Number(close),
+        volume: Number(volume),
+      });
+    }
+  }
+
+  return [...byTimestamp.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, candle]) => candle);
+}
 
 function normalizeAddress(address) {
   if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
