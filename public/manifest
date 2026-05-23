@@ -1,0 +1,55 @@
+{
+  "name": "Agent Commerce Desk",
+  "version": "0.2.0",
+  "description": "Checks whether a Base wallet is safe and ready to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
+  "payTo": "0xb19262185bac9748e2b71674Ef48676448F7A516",
+  "acceptedPayment": {
+    "asset": "native USDC",
+    "network": "Base",
+    "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+  },
+  "endpoints": {
+    "free": [
+      "GET /",
+      "GET /manifest",
+      "GET /.well-known/agent-card.json",
+      "GET /.well-known/agent.json",
+      "GET /api/preview?address=0x..."
+    ],
+    "paidProof": [
+      "GET /api/readiness?address=0x..."
+    ]
+  },
+  "problemSolved": [
+    "validate a receiving wallet before publishing it for agent payments",
+    "show buyers machine-readable proof of Base wallet readiness",
+    "turn the proof into a fixed-price payment or automation setup"
+  ],
+  "offers": [
+    {
+      "name": "100 USDC same-day kickoff",
+      "priceUsd": 100,
+      "serviceId": "js7cc5dy5a82kntqdktp5q7fex878nxk"
+    },
+    {
+      "name": "Base USDC payment setup",
+      "priceUsd": 150,
+      "serviceId": "js7fvgyjdmsn0fkcaxc15n4ph98792e2"
+    },
+    {
+      "name": "VPS health dashboard",
+      "priceUsd": 200,
+      "serviceId": "js70xqkx3gdbstj89d1ar8b6js8792rq"
+    },
+    {
+      "name": "Wallet risk monitor",
+      "priceUsd": 250,
+      "serviceId": "js73rkcjcx39b7spkrqx45ceyx8784xy"
+    },
+    {
+      "name": "Agent QA harness",
+      "priceUsd": 300,
+      "serviceId": "js7a7mx9k9vzb6mcfyb4zjf13s8787sd"
+    }
+  ]
+}

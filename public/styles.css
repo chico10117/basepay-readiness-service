@@ -78,6 +78,23 @@ h1 {
   line-height: 1.45;
 }
 
+.problem {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.problem div {
+  border-top: 1px solid var(--ink);
+  padding-top: 14px;
+}
+
+.problem p:last-child {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .offers {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -299,6 +316,10 @@ code {
   }
 
   .offers {
+    grid-template-columns: 1fr;
+  }
+
+  .problem {
     grid-template-columns: 1fr;
   }
 

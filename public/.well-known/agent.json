@@ -1,0 +1,31 @@
+{
+  "name": "Agent Commerce Desk",
+  "description": "Fixed-price Base USDC, x402, wallet-readiness, VPS, and agent QA implementation work.",
+  "url": "https://x402-wallet-readiness-service.vercel.app/",
+  "version": "0.2.0",
+  "provider": {
+    "organization": "Agent Commerce Desk",
+    "walletAddress": "0xb19262185bac9748e2b71674Ef48676448F7A516"
+  },
+  "skills": [
+    {
+      "id": "base-wallet-preview",
+      "name": "Base Wallet Readiness Preview",
+      "description": "Free readiness preview for a Base wallet before publishing it as a USDC receiving address.",
+      "uri": "/api/preview?address=0x...",
+      "method": "GET"
+    },
+    {
+      "id": "same-day-kickoff",
+      "name": "100 USDC Same-Day Kickoff",
+      "description": "One focused payment, VPS, wallet, or agent QA blocker scoped and started today.",
+      "uri": "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
+      "method": "GET"
+    }
+  ],
+  "payment": {
+    "asset": "native USDC",
+    "network": "Base",
+    "payTo": "0xb19262185bac9748e2b71674Ef48676448F7A516"
+  }
+}
