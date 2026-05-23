@@ -65,6 +65,7 @@ const serviceInfo = {
     network: "Base",
     networkCaip2: NETWORK,
     price: PRICE,
+    payTo: PAY_TO,
     facilitator: FACILITATOR_URL,
   },
   endpoints: {
@@ -493,11 +494,13 @@ app.use(
             tags: ["base", "wallet", "usdc", "payment-safety", "agent-payments"],
             info: {
               input: {
+                type: "http",
                 method: "GET",
                 queryParams: {
                   address: SAMPLE_ADDRESS,
                 },
               },
+              output: readinessBazaarOutput(),
             },
           },
         },
@@ -521,8 +524,13 @@ app.use(
             tags: ["base", "wallet", "usdc", "payment-safety", "agent-payments"],
             info: {
               input: {
-                address: SAMPLE_ADDRESS,
+                type: "http",
+                method: "GET",
+                pathParams: {
+                  address: SAMPLE_ADDRESS,
+                },
               },
+              output: readinessBazaarOutput(),
             },
           },
         },
@@ -546,11 +554,13 @@ app.use(
             tags: ["800402", "erc-8004", "x402", "base", "usdc", "agent-commerce"],
             info: {
               input: {
+                type: "http",
                 method: "GET",
                 queryParams: {
                   address: SAMPLE_ADDRESS,
                 },
               },
+              output: receiptBazaarOutput(),
             },
           },
         },
@@ -574,8 +584,13 @@ app.use(
             tags: ["800402", "erc-8004", "x402", "base", "usdc", "agent-commerce"],
             info: {
               input: {
-                address: SAMPLE_ADDRESS,
+                type: "http",
+                method: "GET",
+                pathParams: {
+                  address: SAMPLE_ADDRESS,
+                },
               },
+              output: receiptBazaarOutput(),
             },
           },
         },
@@ -1163,6 +1178,40 @@ function x402Info(path) {
     network: NETWORK,
     facilitator: FACILITATOR_URL,
     payTo: PAY_TO,
+  };
+}
+
+function readinessBazaarOutput() {
+  return {
+    type: "json",
+    example: {
+      address: SAMPLE_ADDRESS,
+      network: "base",
+      native_usdc_balance: "0",
+      native_eth_balance: "0",
+      transaction_count: 0,
+      token_transfers: 0,
+      is_contract: false,
+    },
+  };
+}
+
+function receiptBazaarOutput() {
+  return {
+    type: "json",
+    example: {
+      receiptType: "agent-commerce-readiness",
+      agent: {
+        name: serviceInfo.name,
+        wallet: PAY_TO,
+      },
+      payment: paymentInfo(),
+      walletReadiness: {
+        address: SAMPLE_ADDRESS,
+        native_usdc_balance: "0",
+        is_contract: false,
+      },
+    },
   };
 }
 
