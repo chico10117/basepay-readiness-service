@@ -9,7 +9,7 @@ WorkingDirectory=/opt/basepay-readiness
 Environment=NODE_ENV=production
 Environment=PORT=4021
 Environment=PUBLIC_URL=https://x402-wallet-readiness-service.vercel.app
-Environment=PAY_TO=0xb19262185bac9748e2b71674Ef48676448F7A516
+Environment=PAY_TO=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9
 Environment=X402_PRICE=$2
 Environment=X402_NETWORK=eip155:8453
 Environment=X402_FACILITATOR_URL=https://facilitator.world.fun
