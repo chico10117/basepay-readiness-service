@@ -1,0 +1,56 @@
+name: Paid work request
+description: Request a scoped USDC-on-Base implementation job.
+title: "[Paid work] "
+labels: ["paid-work"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for the 100 USDC same-day kickoff or a larger fixed-price job.
+        Do not paste private keys, seed phrases, API keys, passwords, or production secrets.
+  - type: dropdown
+    id: offer
+    attributes:
+      label: Offer
+      options:
+        - 100 USDC same-day kickoff
+        - 150 USDC Base USDC payment setup
+        - 200 USDC VPS health dashboard
+        - 250 USDC wallet risk monitor
+        - 300 USDC agent QA harness
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What should be checked, built, or fixed?
+      placeholder: "Example: add x402 payment gating to this public API route..."
+    validations:
+      required: true
+  - type: input
+    id: public-url
+    attributes:
+      label: Public URL or repo
+      description: Public link only. If private access is needed, say so without sharing credentials.
+      placeholder: "https://github.com/org/repo or https://example.com"
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Current blocker or evidence
+      description: Logs, error text, endpoint behavior, or screenshots. Remove secrets first.
+  - type: dropdown
+    id: payment
+    attributes:
+      label: Payment rail
+      options:
+        - Native USDC on Base
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I will not share private keys, seed phrases, or production secrets in this issue.
+          required: true

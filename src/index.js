@@ -63,6 +63,16 @@ const serviceInfo = {
   },
   offers: [
     {
+      name: "Same-day kickoff",
+      priceUsd: 100,
+      deliverables: [
+        "one scoped blocker",
+        "same-day start",
+        "public evidence review",
+        "next-step patch plan",
+      ],
+    },
+    {
       name: "Base USDC payment setup",
       priceUsd: 150,
       deliverables: [

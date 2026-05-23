@@ -80,7 +80,7 @@ h1 {
 
 .offers {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -92,6 +92,14 @@ h1 {
   border: 1px solid var(--ink);
   background: #fffdf7;
   padding: 16px;
+}
+
+.starter-offer {
+  background: #ecfff7;
+}
+
+.starter-offer .price {
+  background: var(--green);
 }
 
 .price {

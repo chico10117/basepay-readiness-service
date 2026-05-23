@@ -9,6 +9,7 @@ native USDC on Base.
 Primary offers:
 
 ```text
+$100 Same-day kickoff
 $150 Base USDC payment setup
 $200 VPS health dashboard
 $250 Wallet risk monitor
