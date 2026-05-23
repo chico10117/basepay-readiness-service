@@ -8,7 +8,7 @@ import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { paymentMiddleware } from "@x402/express";
 
 const PAY_TO =
-  process.env.PAY_TO ?? "0xb19262185bac9748e2b71674Ef48676448F7A516";
+  process.env.PAY_TO ?? "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9";
 const PORT = Number(process.env.PORT ?? "4021");
 const NETWORK = process.env.X402_NETWORK ?? "eip155:8453";
 const PRICE = process.env.X402_PRICE ?? "$2";
@@ -86,7 +86,7 @@ const serviceInfo = {
     ],
   },
   input: {
-    address: "EVM address on Base, e.g. 0xb19262185bac9748e2b71674Ef48676448F7A516",
+    address: "EVM address on Base, e.g. 0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
   },
   offers: [
     {
@@ -178,11 +178,11 @@ app.get("/api/800402/preview", (_req, res) => {
     payment: paymentInfo(),
     endpoints: {
       freePreview:
-        `${baseUrl()}/api/preview?address=0xb19262185bac9748e2b71674Ef48676448F7A516`,
+        `${baseUrl()}/api/preview?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
       paidReadiness:
-        `${baseUrl()}/api/readiness/0xb19262185bac9748e2b71674Ef48676448F7A516`,
+        `${baseUrl()}/api/readiness/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
       paidCommerceReceipt:
-        `${baseUrl()}/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516`,
+        `${baseUrl()}/api/agent-commerce-receipt/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
     },
   });
 });
@@ -257,7 +257,7 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         method: "GET",
         payment: serviceInfo.acceptedPayment,
         endpointUrl:
-          "/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
+          "/api/readiness?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
         inputSchema: {
           type: "object",
           required: ["address"],
@@ -272,7 +272,7 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         method: "GET",
         payment: serviceInfo.acceptedPayment,
         endpointUrl:
-          "/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516",
+          "/api/agent-commerce-receipt/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
         inputSchema: {
           type: "object",
           required: ["address"],
@@ -379,7 +379,7 @@ app.get("/.well-known/agent.json", (_req, res) => {
         description:
           "Full Base wallet readiness report returned after an x402 USDC payment.",
         uri:
-          "/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
+          "/api/readiness?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
         method: "GET",
       },
       {
@@ -388,7 +388,7 @@ app.get("/.well-known/agent.json", (_req, res) => {
         description:
           "Combines agent identity metadata, x402 Base USDC payment terms, and Base wallet-readiness evidence after an x402 payment.",
         uri:
-          "/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516",
+          "/api/agent-commerce-receipt/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
         method: "GET",
       },
       {
@@ -425,7 +425,7 @@ app.get("/.well-known/agent.json", (_req, res) => {
       },
     ],
     payment: paymentInfo(),
-    x402: x402Info("/api/readiness/0xb19262185bac9748e2b71674Ef48676448F7A516"),
+    x402: x402Info("/api/readiness/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9"),
   });
 });
 
@@ -459,7 +459,7 @@ app.use(
               input: {
                 method: "GET",
                 queryParams: {
-                  address: "0xb19262185bac9748e2b71674Ef48676448F7A516",
+                  address: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
                 },
               },
             },
@@ -485,7 +485,7 @@ app.use(
             tags: ["base", "wallet", "usdc", "payment-safety", "agent-payments"],
             info: {
               input: {
-                address: "0xb19262185bac9748e2b71674Ef48676448F7A516",
+                address: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
               },
             },
           },
@@ -512,7 +512,7 @@ app.use(
               input: {
                 method: "GET",
                 queryParams: {
-                  address: "0xb19262185bac9748e2b71674Ef48676448F7A516",
+                  address: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
                 },
               },
             },
@@ -538,7 +538,7 @@ app.use(
             tags: ["800402", "erc-8004", "x402", "base", "usdc", "agent-commerce"],
             info: {
               input: {
-                address: "0xb19262185bac9748e2b71674Ef48676448F7A516",
+                address: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
               },
             },
           },
@@ -1087,13 +1087,13 @@ function agentIdentity() {
         name: "Base wallet readiness",
         transport: "https",
         payment: "x402",
-        endpoint: `${baseUrl()}/api/readiness/0xb19262185bac9748e2b71674Ef48676448F7A516`,
+        endpoint: `${baseUrl()}/api/readiness/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
       },
       {
         name: "800402 agent commerce receipt",
         transport: "https",
         payment: "x402",
-        endpoint: `${baseUrl()}/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516`,
+        endpoint: `${baseUrl()}/api/agent-commerce-receipt/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
       },
       {
         name: "Target wallet signature helper",

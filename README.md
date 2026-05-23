@@ -39,7 +39,7 @@ $2
 Default receiving wallet:
 
 ```text
-0xb19262185bac9748e2b71674Ef48676448F7A516
+0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9
 ```
 
 Default settlement:
@@ -89,7 +89,7 @@ npm start
 Without a payment header, the paid endpoint should return HTTP 402:
 
 ```sh
-curl -i 'http://localhost:4021/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516'
+curl -i 'http://localhost:4021/api/readiness?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9'
 ```
 
 Free metadata:
@@ -117,7 +117,7 @@ To accept real USDC on Base:
 ```sh
 export X402_NETWORK=eip155:8453
 export X402_FACILITATOR_URL=https://facilitator.world.fun
-export PAY_TO=0xb19262185bac9748e2b71674Ef48676448F7A516
+export PAY_TO=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9
 export X402_PRICE='$2'
 npm start
 ```

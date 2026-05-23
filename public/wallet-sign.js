@@ -1,4 +1,4 @@
-const TARGET_ADDRESS = "0xb19262185bac9748e2b71674Ef48676448F7A516";
+const DEFAULT_TARGET_ADDRESS = "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9";
 const BASE_CHAIN_ID = "0x2105";
 const BASE_CHAIN_DECIMAL = 8453;
 
@@ -12,10 +12,12 @@ const statusText = document.querySelector("#signer-status");
 const connectedAddress = document.querySelector("#connected-address");
 const chainStatus = document.querySelector("#chain-status");
 const copyButton = document.querySelector("#copy-output");
+const targetAddressNodes = document.querySelectorAll("[data-target-address]");
 
 let provider = getProvider();
 let currentAddress = "";
 let currentChainId = "";
+let targetAddress = DEFAULT_TARGET_ADDRESS;
 
 connectButton.addEventListener("click", connectWallet);
 switchBaseButton.addEventListener("click", switchToBase);
@@ -33,8 +35,9 @@ if (provider?.on) {
   });
 }
 
-updateWalletStatus();
 hydrateFromUrlParams();
+updateTargetAddressDisplay();
+updateWalletStatus();
 
 function getProvider() {
   if (!window.ethereum) return null;
@@ -54,6 +57,11 @@ function hydrateFromUrlParams() {
   const challenge =
     params.get("challenge") || params.get("message") || params.get("typedData");
   const source = params.get("source");
+  const target = params.get("targetAddress") || params.get("address");
+
+  if (target && /^0x[a-fA-F0-9]{40}$/.test(target)) {
+    targetAddress = target;
+  }
 
   if (method && [...methodSelect.options].some((option) => option.value === method)) {
     methodSelect.value = method;
@@ -62,7 +70,7 @@ function hydrateFromUrlParams() {
     challengeInput.value = challenge;
     output.textContent = [
       source ? `Challenge loaded for ${source}.` : "Challenge loaded from URL.",
-      "Connect the target wallet, switch to Base if needed, then sign.",
+      `Connect ${targetAddress}, switch to Base if needed, then sign.`,
       "Copy the resulting JSON back to Codex.",
     ].join("\n");
     setStatus("Challenge loaded from URL.");
@@ -152,7 +160,7 @@ async function signChallenge(event) {
 
     const payload = {
       address: currentAddress,
-      targetAddress: TARGET_ADDRESS,
+      targetAddress,
       chainId: parseInt(currentChainId || BASE_CHAIN_ID, 16),
       method,
       message:
@@ -222,10 +230,16 @@ function setStatus(message, isError = false) {
 }
 
 function isTargetWallet(address) {
-  return address.toLowerCase() === TARGET_ADDRESS.toLowerCase();
+  return address.toLowerCase() === targetAddress.toLowerCase();
 }
 
 function normalizeChainId(chainId) {
   if (typeof chainId === "number") return `0x${chainId.toString(16)}`;
   return String(chainId || "").toLowerCase();
+}
+
+function updateTargetAddressDisplay() {
+  for (const node of targetAddressNodes) {
+    node.textContent = targetAddress;
+  }
 }
