@@ -14,7 +14,12 @@
       "method": "GET",
       "payment": {
         "asset": "native USDC",
-        "network": "Base"
+        "network": "Base",
+        "networkCaip2": "eip155:8453",
+        "priceUsd": 2,
+        "payTo": "0xb19262185bac9748e2b71674Ef48676448F7A516",
+        "facilitator": "https://facilitator.world.fun",
+        "endpoint": "/api/readiness?address=0x..."
       }
     },
     {

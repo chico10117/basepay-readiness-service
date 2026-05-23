@@ -9,22 +9,21 @@ import { paymentMiddleware } from "@x402/express";
 const PAY_TO =
   process.env.PAY_TO ?? "0xb19262185bac9748e2b71674Ef48676448F7A516";
 const PORT = Number(process.env.PORT ?? "4021");
-const NETWORK = process.env.X402_NETWORK ?? "eip155:84532";
+const NETWORK = process.env.X402_NETWORK ?? "eip155:8453";
 const PRICE = process.env.X402_PRICE ?? "$2";
 const BASE_RPC = process.env.BASE_RPC ?? "https://mainnet.base.org";
 const BLOCKSCOUT = process.env.BLOCKSCOUT ?? "https://base.blockscout.com";
 const USDC_CONTRACT =
   process.env.USDC_CONTRACT ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const FACILITATOR_URL =
+  process.env.X402_FACILITATOR_URL ?? "https://facilitator.world.fun";
 const PUBLIC_URL = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL) : null;
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 
-const isMainnet = NETWORK === "eip155:8453";
 const facilitatorClient =
-  process.env.X402_USE_CDP_FACILITATOR === "true" || isMainnet
+  process.env.X402_USE_CDP_FACILITATOR === "true"
     ? new HTTPFacilitatorClient(coinbaseFacilitator)
-    : new HTTPFacilitatorClient({
-        url: process.env.X402_FACILITATOR_URL ?? "https://x402.org/facilitator",
-      });
+    : new HTTPFacilitatorClient({ url: FACILITATOR_URL });
 
 const resourceServer = new x402ResourceServer(facilitatorClient).register(
   NETWORK,
@@ -45,14 +44,15 @@ app.use(express.json({ limit: "64kb" }));
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.1.0",
+  version: "0.2.0",
   description:
-    "Fixed-price crypto, agent, and VPS automation work with a live x402 wallet-readiness endpoint as proof.",
+    "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
   acceptedPayment: {
     asset: "native USDC",
     network: NETWORK,
     price: PRICE,
+    facilitator: FACILITATOR_URL,
   },
   endpoints: {
     free: ["GET /health", "GET /manifest", "GET /.well-known/agent-card.json"],
@@ -144,18 +144,66 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         name: "base_wallet_payment_readiness_check",
         endpoint: "/api/readiness/{address}",
         method: "GET",
-          payment: serviceInfo.acceptedPayment,
-          endpointUrl:
-            "/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
-          inputSchema: {
-            type: "object",
-            required: ["address"],
+        payment: serviceInfo.acceptedPayment,
+        endpointUrl:
+          "/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
+        inputSchema: {
+          type: "object",
+          required: ["address"],
           properties: {
             address: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$" },
           },
         },
       },
     ],
+  });
+});
+
+app.get("/.well-known/agent.json", (_req, res) => {
+  res.json({
+    name: serviceInfo.name,
+    description:
+      "Fixed-price Base USDC, x402, wallet-readiness, VPS, and agent QA implementation work.",
+    url: PUBLIC_URL?.toString() ?? "http://localhost:4021",
+    version: serviceInfo.version,
+    provider: {
+      organization: serviceInfo.name,
+      walletAddress: PAY_TO,
+    },
+    skills: [
+      {
+        id: "base-wallet-preview",
+        name: "Base Wallet Readiness Preview",
+        description:
+          "Free readiness preview for a Base wallet before publishing it as a USDC receiving address.",
+        uri: "/api/preview?address=0x...",
+        method: "GET",
+      },
+      {
+        id: "paid-base-wallet-readiness",
+        name: "Paid x402 Base Wallet Readiness Report",
+        description:
+          "Full Base wallet readiness report returned after an x402 USDC payment.",
+        uri:
+          "/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
+        method: "GET",
+      },
+    ],
+    payment: {
+      asset: "native USDC",
+      network: "Base",
+      networkCaip2: NETWORK,
+      facilitator: FACILITATOR_URL,
+      payTo: PAY_TO,
+    },
+    x402: {
+      endpoint:
+        "https://x402-wallet-readiness-service.vercel.app/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
+      method: "GET",
+      priceUsd: Number(PRICE.replace(/^\$/, "")),
+      asset: USDC_CONTRACT,
+      network: NETWORK,
+    },
   });
 });
 

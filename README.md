@@ -35,6 +35,14 @@ Default receiving wallet:
 0xb19262185bac9748e2b71674Ef48676448F7A516
 ```
 
+Default settlement:
+
+```text
+Network: Base mainnet (`eip155:8453`)
+Asset: native USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`)
+Facilitator: https://facilitator.world.fun
+```
+
 The endpoint checks:
 
 - Base ETH balance
@@ -44,7 +52,7 @@ The endpoint checks:
 - Contract-vs-EOA status
 - Blockscout reputation and token visibility
 
-## Local Testnet Run
+## Local Run
 
 ```sh
 npm install
@@ -66,19 +74,19 @@ curl http://localhost:4021/.well-known/agent-card.json
 
 ## Production Mainnet Settings
 
-To accept real USDC on Base through CDP's facilitator:
+To accept real USDC on Base:
 
 ```sh
 export X402_NETWORK=eip155:8453
-export X402_USE_CDP_FACILITATOR=true
-export CDP_API_KEY_ID=...
-export CDP_API_KEY_SECRET=...
+export X402_FACILITATOR_URL=https://facilitator.world.fun
 export PAY_TO=0xb19262185bac9748e2b71674Ef48676448F7A516
 export X402_PRICE='$2'
 npm start
 ```
 
-Do not commit CDP credentials.
+To use Coinbase CDP's facilitator instead, set `X402_USE_CDP_FACILITATOR=true`
+and provide CDP credentials through environment variables. Do not commit CDP
+credentials.
 
 ## Marketplace Positioning
 

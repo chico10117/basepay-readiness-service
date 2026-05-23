@@ -6,7 +6,9 @@
   "acceptedPayment": {
     "asset": "native USDC",
     "network": "Base",
-    "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+    "networkCaip2": "eip155:8453",
+    "contract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "facilitator": "https://facilitator.world.fun"
   },
   "endpoints": {
     "free": [
@@ -19,6 +21,14 @@
     "paidProof": [
       "GET /api/readiness?address=0x..."
     ]
+  },
+  "x402": {
+    "endpoint": "https://x402-wallet-readiness-service.vercel.app/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
+    "method": "GET",
+    "priceUsd": 2,
+    "network": "eip155:8453",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "payTo": "0xb19262185bac9748e2b71674Ef48676448F7A516"
   },
   "problemSolved": [
     "validate a receiving wallet before publishing it for agent payments",
