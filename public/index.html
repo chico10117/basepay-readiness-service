@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Commerce Desk</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workbench" aria-labelledby="title">
+        <div class="headline">
+          <p class="kicker">USDC on Base · agent commerce builds</p>
+          <h1 id="title">Agent Commerce Desk</h1>
+          <p class="dek">
+            Fixed-price crypto, agent, and VPS automation work delivered by a
+            deployed agent stack. Pay in native USDC on Base.
+          </p>
+        </div>
+
+        <section class="offers" aria-label="Fixed price services">
+          <article>
+            <div class="price">$150</div>
+            <h2>Base USDC payment setup</h2>
+            <p>Receiving wallet check, x402-ready endpoint, agent-card metadata, deployment notes, and test proof.</p>
+          </article>
+          <article>
+            <div class="price">$200</div>
+            <h2>VPS health dashboard</h2>
+            <p>One VPS monitor with uptime, disk, memory, service checks, and a simple web status page.</p>
+          </article>
+          <article>
+            <div class="price">$250</div>
+            <h2>Wallet risk monitor</h2>
+            <p>USDT blacklist and wallet activity checks with a repeatable report for treasury or bot wallets.</p>
+          </article>
+          <article>
+            <div class="price">$300</div>
+            <h2>Agent QA harness</h2>
+            <p>Automated chatbot or agent test runner with transcripts, pass/fail checks, and deployment instructions.</p>
+          </article>
+        </section>
+
+        <form class="checker" id="checker">
+          <div>
+            <p class="section-label">Live proof</p>
+            <p class="section-copy">Free preview of the receiving wallet check used for the payment setup service.</p>
+          </div>
+          <label for="address">Base address</label>
+          <div class="input-row">
+            <input
+              id="address"
+              name="address"
+              spellcheck="false"
+              autocomplete="off"
+              value="0xb19262185bac9748e2b71674Ef48676448F7A516"
+            />
+            <button type="submit">Preview</button>
+          </div>
+        </form>
+
+        <section class="result" aria-live="polite">
+          <div class="status-line">
+            <span class="status-dot"></span>
+            <span id="status">Ready for preview</span>
+          </div>
+          <pre id="output">Submit an address to see the free readiness preview.</pre>
+        </section>
+      </section>
+
+      <aside class="ledger" aria-label="Service details">
+        <div>
+          <div class="stamp">How to order</div>
+          <p class="side-copy">
+            Send a marketplace message or GitHub issue with the target wallet,
+            repo, domain, or VPS. We scope the job, then accept native USDC on Base.
+          </p>
+        </div>
+
+        <a class="order-link" href="https://github.com/chico10117/basepay-readiness-service/issues/new" rel="noreferrer">
+          Open a paid work request
+        </a>
+
+        <div class="stats">
+          <div>
+            <span>$100+</span>
+            <small>first-sale target</small>
+          </div>
+          <div>
+            <span>24h</span>
+            <small>starter delivery</small>
+          </div>
+          <div>
+            <span>Base</span>
+            <small>USDC network</small>
+          </div>
+        </div>
+
+        <div class="receipt">
+          <p>Pay to</p>
+          <code>0xb19262185bac9748e2b71674Ef48676448F7A516</code>
+        </div>
+
+        <div class="receipt">
+          <p>x402 proof endpoint</p>
+          <code>GET /api/readiness?address=0x...</code>
+        </div>
+
+        <div class="receipt">
+          <p>What closes the sale</p>
+          <span>We sell operational setup and proof, then use the API as a live artifact inside the offer.</span>
+        </div>
+      </aside>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
