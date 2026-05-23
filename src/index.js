@@ -54,7 +54,7 @@ app.use(express.json({ limit: "64kb" }));
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.5.0",
+  version: "0.6.0",
   description:
     "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -74,6 +74,8 @@ const serviceInfo = {
       "GET /api/800402/preview",
       "GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
       "GET /api/market/crypto-snapshot?limit=50",
+      "POST /api/market/ohlcv",
+      "POST /api/market/crypto-snapshot",
     ],
     paid: [
       "GET /api/readiness?address=0x...",
@@ -190,10 +192,28 @@ app.get("/api/market/ohlcv", async (req, res, next) => {
   }
 });
 
+app.post("/api/market/ohlcv", async (req, res, next) => {
+  try {
+    requireMarketApiKey(req);
+    res.json(await buildMarketOhlcvFeed(bodyToQuery(req.body)));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/market/crypto-snapshot", async (req, res, next) => {
   try {
     requireMarketApiKey(req);
     res.json(await buildCryptoSnapshotFeed(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/market/crypto-snapshot", async (req, res, next) => {
+  try {
+    requireMarketApiKey(req);
+    res.json(await buildCryptoSnapshotFeed(bodyToQuery(req.body)));
   } catch (error) {
     next(error);
   }
@@ -361,6 +381,14 @@ app.get("/.well-known/agent.json", (_req, res) => {
           "Cache-backed REST endpoint returning top crypto assets by market cap with price, volume, market cap, 24h change, and Coinbase bid/ask spread where available.",
         uri: "/api/market/crypto-snapshot?limit=50",
         method: "GET",
+      },
+      {
+        id: "post-top-crypto-price-snapshot-feed",
+        name: "POST-compatible Top Crypto Price Snapshot Feed",
+        description:
+          "Marketplace/probe-friendly JSON POST wrapper around the top crypto price snapshot feed.",
+        uri: "/api/market/crypto-snapshot",
+        method: "POST",
       },
     ],
     payment: paymentInfo(),
@@ -544,6 +572,18 @@ function requireMarketApiKey(req) {
     error.statusCode = 401;
     throw error;
   }
+}
+
+function bodyToQuery(body) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return {};
+  return Object.fromEntries(
+    Object.entries(body)
+      .filter(([, value]) => value != null)
+      .map(([key, value]) => [
+        key,
+        Array.isArray(value) ? value.join(",") : String(value),
+      ]),
+  );
 }
 
 function constantTimeEqual(candidate, expected) {

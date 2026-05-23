@@ -25,6 +25,8 @@ GET /api/agent-commerce-receipt?address=0x...
 GET /api/agent-commerce-receipt/:address
 GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/market/crypto-snapshot?limit=50
+POST /api/market/ohlcv
+POST /api/market/crypto-snapshot
 ```
 
 Default price:
@@ -66,6 +68,10 @@ CoinGecko, plus Coinbase USD bid/ask spread data where a Coinbase product is
 available. It is intended as a live proof artifact for buyer testing before
 turning on API-key access.
 
+The POST wrappers accept JSON bodies such as `{"limit": 50}` or
+`{"pairs": ["BTC-USD", "ETH-USD"], "days": 365}` so marketplace probes can call
+the data feeds without query-string construction.
+
 ## Local Run
 
 ```sh
@@ -88,6 +94,9 @@ curl http://localhost:4021/.well-known/agent.json
 curl http://localhost:4021/api/800402/preview
 curl 'http://localhost:4021/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
 curl 'http://localhost:4021/api/market/crypto-snapshot?limit=50'
+curl -X POST http://localhost:4021/api/market/crypto-snapshot \
+  -H 'content-type: application/json' \
+  -d '{"limit": 3}'
 ```
 
 The `agent-commerce-receipt` endpoint is the 800402 demo surface. It combines
