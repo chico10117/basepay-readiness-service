@@ -24,6 +24,7 @@ GET /api/readiness/:address
 GET /api/agent-commerce-receipt?address=0x...
 GET /api/agent-commerce-receipt/:address
 GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
+GET /api/market/crypto-snapshot?limit=50
 ```
 
 Default price:
@@ -60,6 +61,11 @@ Exchange pairs (`BTC-USD`, `ETH-USD`, `SOL-USD`). It is cache-backed and can be
 locked behind `MARKET_FEED_API_KEY` for buyer delivery through `x-api-key` or a
 Bearer token.
 
+The crypto snapshot endpoint returns the top crypto assets by market cap using
+CoinGecko, plus Coinbase USD bid/ask spread data where a Coinbase product is
+available. It is intended as a live proof artifact for buyer testing before
+turning on API-key access.
+
 ## Local Run
 
 ```sh
@@ -81,6 +87,7 @@ curl http://localhost:4021/.well-known/agent-card.json
 curl http://localhost:4021/.well-known/agent.json
 curl http://localhost:4021/api/800402/preview
 curl 'http://localhost:4021/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
+curl 'http://localhost:4021/api/market/crypto-snapshot?limit=50'
 ```
 
 The `agent-commerce-receipt` endpoint is the 800402 demo surface. It combines

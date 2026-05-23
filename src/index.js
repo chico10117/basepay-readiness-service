@@ -15,11 +15,15 @@ const PRICE = process.env.X402_PRICE ?? "$2";
 const BASE_RPC = process.env.BASE_RPC ?? "https://mainnet.base.org";
 const COINBASE_EXCHANGE_API =
   process.env.COINBASE_EXCHANGE_API ?? "https://api.exchange.coinbase.com";
+const COINGECKO_API = process.env.COINGECKO_API ?? "https://api.coingecko.com";
 const BLOCKSCOUT = process.env.BLOCKSCOUT ?? "https://base.blockscout.com";
 const USDC_CONTRACT =
   process.env.USDC_CONTRACT ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const MARKET_FEED_API_KEY = process.env.MARKET_FEED_API_KEY ?? "";
 const MARKET_CACHE_TTL_SECONDS = Number(process.env.MARKET_CACHE_TTL_SECONDS ?? "900");
+const MARKET_SNAPSHOT_CACHE_TTL_SECONDS = Number(
+  process.env.MARKET_SNAPSHOT_CACHE_TTL_SECONDS ?? "60",
+);
 const FACILITATOR_URL =
   process.env.X402_FACILITATOR_URL ?? "https://facilitator.world.fun";
 const PUBLIC_URL = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL) : null;
@@ -50,7 +54,7 @@ app.use(express.json({ limit: "64kb" }));
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.4.0",
+  version: "0.5.0",
   description:
     "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -69,6 +73,7 @@ const serviceInfo = {
       "GET /.well-known/agent-card.json",
       "GET /api/800402/preview",
       "GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
+      "GET /api/market/crypto-snapshot?limit=50",
     ],
     paid: [
       "GET /api/readiness?address=0x...",
@@ -130,6 +135,16 @@ const serviceInfo = {
         "cache and uptime notes",
       ],
     },
+    {
+      name: "Top-50 crypto price snapshot feed",
+      priceUsd: 150,
+      deliverables: [
+        "REST JSON endpoint",
+        "top 50 crypto assets by market cap",
+        "price, volume, market cap, and Coinbase bid/ask where available",
+        "60-second cache and API-key option",
+      ],
+    },
   ],
 };
 
@@ -170,6 +185,15 @@ app.get("/api/market/ohlcv", async (req, res, next) => {
   try {
     requireMarketApiKey(req);
     res.json(await buildMarketOhlcvFeed(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/market/crypto-snapshot", async (req, res, next) => {
+  try {
+    requireMarketApiKey(req);
+    res.json(await buildCryptoSnapshotFeed(req.query));
   } catch (error) {
     next(error);
   }
@@ -258,6 +282,27 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
           },
         },
       },
+      {
+        name: "top_crypto_price_snapshot_feed",
+        endpoint: "/api/market/crypto-snapshot",
+        method: "GET",
+        payment: {
+          mode: MARKET_FEED_API_KEY ? "api_key" : "demo_unlocked",
+          settlement: "USDC on Base by service agreement",
+          payTo: PAY_TO,
+        },
+        endpointUrl: "/api/market/crypto-snapshot?limit=50",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: {
+              type: "integer",
+              minimum: 1,
+              maximum: 50,
+            },
+          },
+        },
+      },
     ],
   });
 });
@@ -307,6 +352,14 @@ app.get("/.well-known/agent.json", (_req, res) => {
         description:
           "Cache-backed REST endpoint returning daily BTC/USD and ETH/USD OHLCV candles with optional API-key auth for buyer delivery.",
         uri: "/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
+        method: "GET",
+      },
+      {
+        id: "top-crypto-price-snapshot-feed",
+        name: "Top-50 Crypto Price Snapshot Feed",
+        description:
+          "Cache-backed REST endpoint returning top crypto assets by market cap with price, volume, market cap, 24h change, and Coinbase bid/ask spread where available.",
+        uri: "/api/market/crypto-snapshot?limit=50",
         method: "GET",
       },
     ],
@@ -529,6 +582,188 @@ async function buildMarketOhlcvFeed(query) {
     markets,
     latencyMs: Date.now() - startedAt,
   };
+}
+
+async function buildCryptoSnapshotFeed(query) {
+  const limit = parseSnapshotLimit(query.limit);
+  const startedAt = Date.now();
+  const assets = await getCryptoSnapshot(limit);
+
+  return {
+    service: "Agent Commerce Desk Crypto Snapshot Feed",
+    version: serviceInfo.version,
+    generatedAt: new Date().toISOString(),
+    sources: {
+      rankingAndMarketCap: "CoinGecko public markets API",
+      executableUsdQuotes: "Coinbase Exchange public ticker API",
+    },
+    auth: {
+      mode: MARKET_FEED_API_KEY ? "api_key_required" : "demo_unlocked",
+      acceptedHeaders: MARKET_FEED_API_KEY
+        ? ["x-api-key", "authorization: Bearer <token>"]
+        : [],
+    },
+    cache: {
+      ttlSeconds: MARKET_SNAPSHOT_CACHE_TTL_SECONDS,
+      strategy: "in-memory per deployment instance",
+    },
+    request: {
+      limit,
+      quoteCurrency: "USD",
+    },
+    coverage: {
+      requestedAssets: limit,
+      returnedAssets: assets.length,
+      coinbaseBidAskAssets: assets.filter((asset) => asset.coinbaseUsd).length,
+    },
+    assets,
+    latencyMs: Date.now() - startedAt,
+  };
+}
+
+function parseSnapshotLimit(rawLimit) {
+  const limit = Number(rawLimit || 50);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    const error = new Error("limit must be an integer between 1 and 50");
+    error.statusCode = 400;
+    throw error;
+  }
+  return limit;
+}
+
+async function getCryptoSnapshot(limit) {
+  const cacheKey = `snapshot:${limit}`;
+  const now = Date.now();
+  const cached = MARKET_CACHE.get(cacheKey);
+  if (cached?.expiresAt > now) {
+    return cached.value.map((asset) => ({ ...asset, cacheHit: true }));
+  }
+
+  const [markets, usdProducts] = await Promise.all([
+    fetchCoinGeckoMarkets(limit),
+    fetchCoinbaseUsdProducts(),
+  ]);
+  const assets = await mapWithConcurrency(markets, 8, async (market) => {
+    const symbol = String(market.symbol ?? "").toUpperCase();
+    const product = usdProducts.get(symbol);
+    const coinbase = product ? await fetchCoinbaseTicker(product.id) : null;
+    const bid = coinbase?.bid ? Number(coinbase.bid) : null;
+    const ask = coinbase?.ask ? Number(coinbase.ask) : null;
+
+    return {
+      rank: Number(market.market_cap_rank ?? 0),
+      id: market.id,
+      symbol,
+      name: market.name,
+      priceUsd: Number(market.current_price ?? 0),
+      marketCapUsd: Number(market.market_cap ?? 0),
+      volume24hUsd: Number(market.total_volume ?? 0),
+      priceChange24hPct:
+        market.price_change_percentage_24h == null
+          ? null
+          : Number(market.price_change_percentage_24h),
+      coinbaseUsd: product
+        ? {
+            productId: product.id,
+            bid,
+            ask,
+            last: coinbase?.price ? Number(coinbase.price) : null,
+            spread: bid != null && ask != null ? Number((ask - bid).toFixed(10)) : null,
+            spreadPct:
+              bid != null && ask != null && ask > 0
+                ? Number((((ask - bid) / ask) * 100).toFixed(6))
+                : null,
+            exchangeVolume24h: coinbase?.volume ? Number(coinbase.volume) : null,
+            quoteTime: coinbase?.time ?? null,
+          }
+        : null,
+      cacheHit: false,
+    };
+  });
+
+  MARKET_CACHE.set(cacheKey, {
+    expiresAt: now + MARKET_SNAPSHOT_CACHE_TTL_SECONDS * 1000,
+    value: assets,
+  });
+
+  return assets;
+}
+
+async function fetchCoinGeckoMarkets(limit) {
+  const url = new URL("/api/v3/coins/markets", COINGECKO_API);
+  url.searchParams.set("vs_currency", "usd");
+  url.searchParams.set("order", "market_cap_desc");
+  url.searchParams.set("per_page", String(limit));
+  url.searchParams.set("page", "1");
+  url.searchParams.set("sparkline", "false");
+  url.searchParams.set("price_change_percentage", "24h");
+
+  const rows = await fetchJson(url, "CoinGecko markets");
+  if (!Array.isArray(rows)) {
+    throw new Error("CoinGecko markets response was not an array");
+  }
+  return rows;
+}
+
+async function fetchCoinbaseUsdProducts() {
+  const cacheKey = "coinbase:usd-products";
+  const now = Date.now();
+  const cached = MARKET_CACHE.get(cacheKey);
+  if (cached?.expiresAt > now) return cached.value;
+
+  const products = await fetchJson(
+    new URL("/products", COINBASE_EXCHANGE_API),
+    "Coinbase products",
+  );
+  if (!Array.isArray(products)) {
+    throw new Error("Coinbase products response was not an array");
+  }
+
+  const byBase = new Map();
+  for (const product of products) {
+    if (
+      product.quote_currency === "USD" &&
+      product.trading_disabled === false &&
+      typeof product.base_currency === "string"
+    ) {
+      byBase.set(product.base_currency.toUpperCase(), { id: product.id });
+    }
+  }
+
+  MARKET_CACHE.set(cacheKey, {
+    expiresAt: now + 15 * 60 * 1000,
+    value: byBase,
+  });
+
+  return byBase;
+}
+
+async function fetchCoinbaseTicker(productId) {
+  try {
+    return await fetchJson(
+      new URL(`/products/${productId}/ticker`, COINBASE_EXCHANGE_API),
+      `Coinbase ticker ${productId}`,
+    );
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = [];
+  let nextIndex = 0;
+  const workers = Array.from(
+    { length: Math.min(concurrency, items.length) },
+    async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 function parsePairs(rawPairs) {
@@ -848,6 +1083,19 @@ async function getJson(url) {
   });
   if (!response.ok) {
     throw new Error(`Blockscout request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+async function fetchJson(url, label) {
+  const response = await fetch(url, {
+    headers: {
+      accept: "application/json",
+      "user-agent": "codex-agent-market-feed/0.1.0",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`${label} request failed: ${response.status}`);
   }
   return response.json();
 }
