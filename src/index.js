@@ -9,6 +9,7 @@ import { paymentMiddleware } from "@x402/express";
 
 const PAY_TO =
   process.env.PAY_TO ?? "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9";
+const SAMPLE_ADDRESS = process.env.SAMPLE_ADDRESS ?? PAY_TO;
 const PORT = Number(process.env.PORT ?? "4021");
 const NETWORK = process.env.X402_NETWORK ?? "eip155:8453";
 const PRICE = process.env.X402_PRICE ?? "$2";
@@ -86,7 +87,7 @@ const serviceInfo = {
     ],
   },
   input: {
-    address: "EVM address on Base, e.g. 0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+    address: `EVM address on Base, e.g. ${SAMPLE_ADDRESS}`,
   },
   offers: [
     {
@@ -178,11 +179,11 @@ app.get("/api/800402/preview", (_req, res) => {
     payment: paymentInfo(),
     endpoints: {
       freePreview:
-        `${baseUrl()}/api/preview?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
+        `${baseUrl()}/api/preview?address=${SAMPLE_ADDRESS}`,
       paidReadiness:
-        `${baseUrl()}/api/readiness/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
+        `${baseUrl()}/api/readiness/${SAMPLE_ADDRESS}`,
       paidCommerceReceipt:
-        `${baseUrl()}/api/agent-commerce-receipt/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
+        `${baseUrl()}/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
     },
   });
 });
@@ -257,7 +258,7 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         method: "GET",
         payment: serviceInfo.acceptedPayment,
         endpointUrl:
-          "/api/readiness?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+          `/api/readiness?address=${SAMPLE_ADDRESS}`,
         inputSchema: {
           type: "object",
           required: ["address"],
@@ -272,7 +273,7 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         method: "GET",
         payment: serviceInfo.acceptedPayment,
         endpointUrl:
-          "/api/agent-commerce-receipt/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+          `/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
         inputSchema: {
           type: "object",
           required: ["address"],
@@ -379,7 +380,7 @@ app.get("/.well-known/agent.json", (_req, res) => {
         description:
           "Full Base wallet readiness report returned after an x402 USDC payment.",
         uri:
-          "/api/readiness?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+          `/api/readiness?address=${SAMPLE_ADDRESS}`,
         method: "GET",
       },
       {
@@ -388,7 +389,7 @@ app.get("/.well-known/agent.json", (_req, res) => {
         description:
           "Combines agent identity metadata, x402 Base USDC payment terms, and Base wallet-readiness evidence after an x402 payment.",
         uri:
-          "/api/agent-commerce-receipt/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+          `/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
         method: "GET",
       },
       {
@@ -425,7 +426,42 @@ app.get("/.well-known/agent.json", (_req, res) => {
       },
     ],
     payment: paymentInfo(),
-    x402: x402Info("/api/readiness/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9"),
+    x402: x402Info(`/api/readiness/${SAMPLE_ADDRESS}`),
+  });
+});
+
+app.get("/.well-known/x402", (_req, res) => {
+  res.json({
+    x402Version: 2,
+    name: serviceInfo.name,
+    description: serviceInfo.description,
+    network: NETWORK,
+    facilitator: FACILITATOR_URL,
+    settlement: {
+      asset: "native USDC",
+      assetContract: USDC_CONTRACT,
+      network: "Base",
+      networkCaip2: NETWORK,
+      payTo: PAY_TO,
+    },
+    resources: [
+      {
+        url: `${baseUrl()}/api/readiness/${SAMPLE_ADDRESS}`,
+        method: "GET",
+        description:
+          "Paid Base wallet readiness report with ETH balance, native USDC balance, tx count, token transfers, and contract status.",
+        mimeType: "application/json",
+        accepts: [x402Accept()],
+      },
+      {
+        url: `${baseUrl()}/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
+        method: "GET",
+        description:
+          "Paid 800402 agent commerce receipt combining identity metadata, x402 payment terms, and wallet-readiness evidence.",
+        mimeType: "application/json",
+        accepts: [x402Accept()],
+      },
+    ],
   });
 });
 
@@ -459,7 +495,7 @@ app.use(
               input: {
                 method: "GET",
                 queryParams: {
-                  address: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+                  address: SAMPLE_ADDRESS,
                 },
               },
             },
@@ -485,7 +521,7 @@ app.use(
             tags: ["base", "wallet", "usdc", "payment-safety", "agent-payments"],
             info: {
               input: {
-                address: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+                address: SAMPLE_ADDRESS,
               },
             },
           },
@@ -512,7 +548,7 @@ app.use(
               input: {
                 method: "GET",
                 queryParams: {
-                  address: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+                  address: SAMPLE_ADDRESS,
                 },
               },
             },
@@ -538,7 +574,7 @@ app.use(
             tags: ["800402", "erc-8004", "x402", "base", "usdc", "agent-commerce"],
             info: {
               input: {
-                address: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+                address: SAMPLE_ADDRESS,
               },
             },
           },
@@ -1087,13 +1123,13 @@ function agentIdentity() {
         name: "Base wallet readiness",
         transport: "https",
         payment: "x402",
-        endpoint: `${baseUrl()}/api/readiness/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
+        endpoint: `${baseUrl()}/api/readiness/${SAMPLE_ADDRESS}`,
       },
       {
         name: "800402 agent commerce receipt",
         transport: "https",
         payment: "x402",
-        endpoint: `${baseUrl()}/api/agent-commerce-receipt/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`,
+        endpoint: `${baseUrl()}/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
       },
       {
         name: "Target wallet signature helper",
@@ -1127,6 +1163,21 @@ function x402Info(path) {
     network: NETWORK,
     facilitator: FACILITATOR_URL,
     payTo: PAY_TO,
+  };
+}
+
+function x402Accept() {
+  return {
+    scheme: "exact",
+    network: NETWORK,
+    amount: String(Math.round(priceUsd() * 1_000_000)),
+    asset: USDC_CONTRACT,
+    payTo: PAY_TO,
+    maxTimeoutSeconds: 300,
+    extra: {
+      name: "USD Coin",
+      version: "2",
+    },
   };
 }
 
