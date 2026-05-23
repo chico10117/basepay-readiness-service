@@ -39,24 +39,35 @@ if (PUBLIC_URL) {
     next();
   });
 }
-app.use(express.static(PUBLIC_DIR));
 app.use(express.json({ limit: "64kb" }));
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.2.0",
+  version: "0.3.0",
   description:
     "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
   acceptedPayment: {
     asset: "native USDC",
-    network: NETWORK,
+    assetContract: USDC_CONTRACT,
+    network: "Base",
+    networkCaip2: NETWORK,
     price: PRICE,
     facilitator: FACILITATOR_URL,
   },
   endpoints: {
-    free: ["GET /health", "GET /manifest", "GET /.well-known/agent-card.json"],
-    paid: ["GET /api/readiness?address=0x...", "GET /api/readiness/:address"],
+    free: [
+      "GET /health",
+      "GET /manifest",
+      "GET /.well-known/agent-card.json",
+      "GET /api/800402/preview",
+    ],
+    paid: [
+      "GET /api/readiness?address=0x...",
+      "GET /api/readiness/:address",
+      "GET /api/agent-commerce-receipt?address=0x...",
+      "GET /api/agent-commerce-receipt/:address",
+    ],
   },
   input: {
     address: "EVM address on Base, e.g. 0xb19262185bac9748e2b71674Ef48676448F7A516",
@@ -112,6 +123,31 @@ app.get("/manifest", (_req, res) => {
   res.json(serviceInfo);
 });
 
+app.get("/api/800402/preview", (_req, res) => {
+  res.json({
+    name: serviceInfo.name,
+    version: serviceInfo.version,
+    description:
+      "800402-ready agent commerce demo: ERC-8004-style metadata, x402 payment requirements, and Base USDC receiving-wallet proof in one service.",
+    stack: {
+      identity: "ERC-8004-style agent metadata",
+      payment: "x402 exact scheme",
+      settlement: "native USDC on Base mainnet",
+      facilitator: FACILITATOR_URL,
+    },
+    agent: agentIdentity(),
+    payment: paymentInfo(),
+    endpoints: {
+      freePreview:
+        `${baseUrl()}/api/preview?address=0xb19262185bac9748e2b71674Ef48676448F7A516`,
+      paidReadiness:
+        `${baseUrl()}/api/readiness/0xb19262185bac9748e2b71674Ef48676448F7A516`,
+      paidCommerceReceipt:
+        `${baseUrl()}/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516`,
+    },
+  });
+});
+
 app.get("/api/preview/:address", async (req, res, next) => {
   try {
     const report = await buildReadinessReport(req.params.address);
@@ -134,7 +170,7 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
   res.json({
     name: serviceInfo.name,
     description: serviceInfo.description,
-    url: PUBLIC_URL?.toString() ?? "http://localhost:4021",
+    url: baseUrl(),
     provider: {
       name: "Codex Agent Wallet Payments Run",
       wallet: PAY_TO,
@@ -147,6 +183,21 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         payment: serviceInfo.acceptedPayment,
         endpointUrl:
           "/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
+        inputSchema: {
+          type: "object",
+          required: ["address"],
+          properties: {
+            address: { type: "string", pattern: "^0x[a-fA-F0-9]{40}$" },
+          },
+        },
+      },
+      {
+        name: "agent_commerce_receipt",
+        endpoint: "/api/agent-commerce-receipt/{address}",
+        method: "GET",
+        payment: serviceInfo.acceptedPayment,
+        endpointUrl:
+          "/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516",
         inputSchema: {
           type: "object",
           required: ["address"],
@@ -170,6 +221,7 @@ app.get("/.well-known/agent.json", (_req, res) => {
       organization: serviceInfo.name,
       walletAddress: PAY_TO,
     },
+    erc8004: agentIdentity(),
     skills: [
       {
         id: "base-wallet-preview",
@@ -188,24 +240,22 @@ app.get("/.well-known/agent.json", (_req, res) => {
           "/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
         method: "GET",
       },
+      {
+        id: "paid-agent-commerce-receipt",
+        name: "Paid 800402 Agent Commerce Receipt",
+        description:
+          "Combines agent identity metadata, x402 Base USDC payment terms, and Base wallet-readiness evidence after an x402 payment.",
+        uri:
+          "/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516",
+        method: "GET",
+      },
     ],
-    payment: {
-      asset: "native USDC",
-      network: "Base",
-      networkCaip2: NETWORK,
-      facilitator: FACILITATOR_URL,
-      payTo: PAY_TO,
-    },
-    x402: {
-      endpoint:
-        "https://x402-wallet-readiness-service.vercel.app/api/readiness?address=0xb19262185bac9748e2b71674Ef48676448F7A516",
-      method: "GET",
-      priceUsd: Number(PRICE.replace(/^\$/, "")),
-      asset: USDC_CONTRACT,
-      network: NETWORK,
-    },
+    payment: paymentInfo(),
+    x402: x402Info("/api/readiness/0xb19262185bac9748e2b71674Ef48676448F7A516"),
   });
 });
+
+app.use(express.static(PUBLIC_DIR));
 
 app.use(
   paymentMiddleware(
@@ -263,6 +313,59 @@ app.use(
           },
         },
       },
+      "GET /api/agent-commerce-receipt": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "800402 agent commerce receipt by query parameter. Use ?address=0x...",
+        mimeType: "application/json",
+        extensions: {
+          bazaar: {
+            discoverable: true,
+            category: "crypto",
+            tags: ["800402", "erc-8004", "x402", "base", "usdc", "agent-commerce"],
+            info: {
+              input: {
+                method: "GET",
+                queryParams: {
+                  address: "0xb19262185bac9748e2b71674Ef48676448F7A516",
+                },
+              },
+            },
+          },
+        },
+      },
+      "GET /api/agent-commerce-receipt/:address": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "800402 agent commerce receipt: agent identity metadata, x402 payment terms, and Base wallet-readiness evidence.",
+        mimeType: "application/json",
+        extensions: {
+          bazaar: {
+            discoverable: true,
+            category: "crypto",
+            tags: ["800402", "erc-8004", "x402", "base", "usdc", "agent-commerce"],
+            info: {
+              input: {
+                address: "0xb19262185bac9748e2b71674Ef48676448F7A516",
+              },
+            },
+          },
+        },
+      },
     },
     resourceServer,
   ),
@@ -279,6 +382,24 @@ app.get("/api/readiness", async (req, res, next) => {
 app.get("/api/readiness/:address", async (req, res, next) => {
   try {
     res.json(await buildReadinessReport(req.params.address));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/agent-commerce-receipt", async (req, res, next) => {
+  try {
+    const report = await buildReadinessReport(String(req.query.address ?? ""));
+    res.json(buildAgentCommerceReceipt(report));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/agent-commerce-receipt/:address", async (req, res, next) => {
+  try {
+    const report = await buildReadinessReport(req.params.address);
+    res.json(buildAgentCommerceReceipt(report));
   } catch (error) {
     next(error);
   }
@@ -377,6 +498,92 @@ function toPreview(report) {
     paidEndpoint: `/api/readiness?address=${report.address}`,
     note: "Preview is free. The paid x402 endpoint returns the full balance report.",
   };
+}
+
+function buildAgentCommerceReceipt(report) {
+  return {
+    receiptType: "800402-agent-commerce-readiness",
+    generatedAt: new Date().toISOString(),
+    agent: agentIdentity(),
+    payment: paymentInfo(),
+    x402: x402Info(`/api/agent-commerce-receipt/${report.address}`),
+    subject: {
+      wallet: report.address,
+      network: "Base",
+      chainId: 8453,
+    },
+    readinessReport: report,
+    proof: {
+      metadataUrl: `${baseUrl()}/.well-known/agent.json`,
+      agentCardUrl: `${baseUrl()}/.well-known/agent-card.json`,
+      freePreviewUrl: `${baseUrl()}/api/preview/${report.address}`,
+      protectedReceiptUrl: `${baseUrl()}/api/agent-commerce-receipt/${report.address}`,
+      verifierChecklist: [
+        "HTTP 402 challenge returns Base mainnet x402 payment requirements",
+        "payTo matches the published receiving wallet",
+        "asset contract matches native USDC on Base",
+        "wallet-readiness report was generated from Base RPC and Blockscout",
+      ],
+    },
+  };
+}
+
+function agentIdentity() {
+  return {
+    standard: "erc-8004-ready",
+    status: "metadata_published",
+    name: serviceInfo.name,
+    agentWallet: PAY_TO,
+    agentUri: `${baseUrl()}/.well-known/agent.json`,
+    agentCardUri: `${baseUrl()}/.well-known/agent-card.json`,
+    services: [
+      {
+        name: "Base wallet readiness",
+        transport: "https",
+        payment: "x402",
+        endpoint: `${baseUrl()}/api/readiness/0xb19262185bac9748e2b71674Ef48676448F7A516`,
+      },
+      {
+        name: "800402 agent commerce receipt",
+        transport: "https",
+        payment: "x402",
+        endpoint: `${baseUrl()}/api/agent-commerce-receipt/0xb19262185bac9748e2b71674Ef48676448F7A516`,
+      },
+    ],
+    supportedTrust: ["erc-8004", "x402", "base-usdc"],
+  };
+}
+
+function paymentInfo() {
+  return {
+    asset: "native USDC",
+    assetContract: USDC_CONTRACT,
+    network: "Base",
+    networkCaip2: NETWORK,
+    facilitator: FACILITATOR_URL,
+    payTo: PAY_TO,
+    priceUsd: priceUsd(),
+  };
+}
+
+function x402Info(path) {
+  return {
+    endpoint: `${baseUrl()}${path}`,
+    method: "GET",
+    priceUsd: priceUsd(),
+    asset: USDC_CONTRACT,
+    network: NETWORK,
+    facilitator: FACILITATOR_URL,
+    payTo: PAY_TO,
+  };
+}
+
+function baseUrl() {
+  return (PUBLIC_URL?.toString() ?? "http://localhost:4021").replace(/\/$/, "");
+}
+
+function priceUsd() {
+  return Number(PRICE.replace(/^\$/, ""));
 }
 
 async function rpc(method, params) {

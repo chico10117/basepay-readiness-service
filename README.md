@@ -21,6 +21,8 @@ Endpoint:
 ```text
 GET /api/readiness?address=0x...
 GET /api/readiness/:address
+GET /api/agent-commerce-receipt?address=0x...
+GET /api/agent-commerce-receipt/:address
 ```
 
 Default price:
@@ -70,7 +72,13 @@ Free metadata:
 ```sh
 curl http://localhost:4021/manifest
 curl http://localhost:4021/.well-known/agent-card.json
+curl http://localhost:4021/.well-known/agent.json
+curl http://localhost:4021/api/800402/preview
 ```
+
+The `agent-commerce-receipt` endpoint is the 800402 demo surface. It combines
+ERC-8004-style agent metadata, x402 Base USDC payment terms, and the Base
+wallet-readiness evidence in one paid JSON receipt.
 
 ## Production Mainnet Settings
 

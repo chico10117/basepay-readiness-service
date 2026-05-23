@@ -23,6 +23,22 @@
       }
     },
     {
+      "name": "agent_commerce_receipt",
+      "description": "800402 agent commerce receipt with ERC-8004-style metadata, x402 Base USDC payment terms, and wallet-readiness evidence.",
+      "endpoint": "/api/agent-commerce-receipt/{address}",
+      "method": "GET",
+      "payment": {
+        "asset": "native USDC",
+        "assetContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "network": "Base",
+        "networkCaip2": "eip155:8453",
+        "priceUsd": 2,
+        "payTo": "0xb19262185bac9748e2b71674Ef48676448F7A516",
+        "facilitator": "https://facilitator.world.fun",
+        "endpoint": "/api/agent-commerce-receipt?address=0x..."
+      }
+    },
+    {
       "name": "same_day_agent_commerce_kickoff",
       "description": "One focused payment, VPS, wallet, or agent QA blocker scoped and started today.",
       "priceUsd": 100,
