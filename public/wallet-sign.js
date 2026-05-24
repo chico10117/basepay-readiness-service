@@ -157,11 +157,18 @@ async function signChallenge(event) {
             method: "personal_sign",
             params: [challenge, currentAddress],
           });
+    const accountsAfterSign = await provider.request({ method: "eth_accounts" });
+    const signerAddress = accountsAfterSign?.[0] || currentAddress;
+    const chainIdAfterSign = normalizeChainId(
+      await provider.request({ method: "eth_chainId" }),
+    );
 
     const payload = {
-      address: currentAddress,
+      address: signerAddress,
       targetAddress,
-      chainId: parseInt(currentChainId || BASE_CHAIN_ID, 16),
+      chainId: parseInt(chainIdAfterSign || currentChainId || BASE_CHAIN_ID, 16),
+      walletMatchesTarget: isTargetWallet(signerAddress),
+      chainMatchesBase: (chainIdAfterSign || currentChainId) === BASE_CHAIN_ID,
       method,
       message:
         method === "eth_signTypedData_v4" ? JSON.parse(challenge) : challenge,
@@ -170,7 +177,12 @@ async function signChallenge(event) {
     };
 
     output.textContent = JSON.stringify(payload, null, 2);
-    setStatus("Signature ready.");
+    setStatus(
+      payload.walletMatchesTarget && payload.chainMatchesBase
+        ? "Signature ready."
+        : "Signature created, but wallet or chain does not match the target.",
+      !(payload.walletMatchesTarget && payload.chainMatchesBase),
+    );
   } catch (error) {
     setStatus(error.message || "Signing failed.", true);
   }
