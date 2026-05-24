@@ -22,10 +22,14 @@ const MARKET_OHLCV_X402_PRICE =
   process.env.MARKET_OHLCV_X402_PRICE ?? "$0.02";
 const DEV_REPO_SNAPSHOT_X402_PRICE =
   process.env.DEV_REPO_SNAPSHOT_X402_PRICE ?? "$0.05";
+const WEATHER_CURRENT_X402_PRICE =
+  process.env.WEATHER_CURRENT_X402_PRICE ?? "$0.01";
 const BASE_RPC = process.env.BASE_RPC ?? "https://mainnet.base.org";
 const COINBASE_EXCHANGE_API =
   process.env.COINBASE_EXCHANGE_API ?? "https://api.exchange.coinbase.com";
 const COINGECKO_API = process.env.COINGECKO_API ?? "https://api.coingecko.com";
+const OPEN_METEO_API =
+  process.env.OPEN_METEO_API ?? "https://api.open-meteo.com";
 const GITHUB_API = process.env.GITHUB_API ?? "https://api.github.com";
 const GITHUB_PUBLIC_API_TOKEN = process.env.GITHUB_PUBLIC_API_TOKEN ?? "";
 const BLOCKSCOUT = process.env.BLOCKSCOUT ?? "https://base.blockscout.com";
@@ -127,6 +131,7 @@ const serviceInfo = {
       "POST /api/market/crypto-snapshot",
       "GET /api/dev/repo-snapshot?repo=owner/name",
       "POST /api/dev/repo-snapshot",
+      "GET /api/weather/current?latitude=37.7749&longitude=-122.4194",
       "GET /api/pyrimid/recommend?need=paid%20mcp%20tool",
       "POST /api/pyrimid/recommend",
       "GET /.well-known/the402.json",
@@ -143,6 +148,7 @@ const serviceInfo = {
       "GET /api/x402/market/crypto-snapshot?limit=50",
       "GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
       "GET /api/x402/dev/repo-snapshot?repo=owner/name",
+      "GET /api/x402/weather/current?latitude=37.7749&longitude=-122.4194",
     ],
   },
   input: {
@@ -315,6 +321,22 @@ app.get("/api/dev/repo-snapshot", async (req, res, next) => {
 app.post("/api/dev/repo-snapshot", async (req, res, next) => {
   try {
     res.json(await buildRepoSnapshot(bodyToQuery(req.body)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/weather/current", async (req, res, next) => {
+  try {
+    res.json(await buildWeatherCurrent(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/weather/current", async (req, res, next) => {
+  try {
+    res.json(await buildWeatherCurrent(bodyToQuery(req.body)));
   } catch (error) {
     next(error);
   }
@@ -555,6 +577,29 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         },
       },
       {
+        name: "current_weather_forecast_snapshot",
+        endpoint: "/api/weather/current",
+        method: "GET",
+        payment: {
+          mode: "free_preview",
+          settlement: "paid x402 endpoint or service agreement for repeated use",
+          payTo: PAY_TO,
+        },
+        endpointUrl: "/api/weather/current?latitude=37.7749&longitude=-122.4194",
+        inputSchema: weatherInputSchema(),
+      },
+      {
+        name: "paid_current_weather_forecast_snapshot",
+        endpoint: "/api/x402/weather/current",
+        method: "GET",
+        payment: x402Info(
+          "/api/x402/weather/current?latitude=37.7749&longitude=-122.4194",
+          WEATHER_CURRENT_X402_PRICE,
+        ),
+        endpointUrl: "/api/x402/weather/current?latitude=37.7749&longitude=-122.4194",
+        inputSchema: weatherInputSchema(),
+      },
+      {
         name: "target_wallet_signature_helper",
         endpoint: "/wallet-sign",
         method: "GET",
@@ -743,6 +788,22 @@ app.get("/.well-known/agent.json", (_req, res) => {
         method: "GET",
       },
       {
+        id: "current-weather-forecast-snapshot",
+        name: "Current Weather Forecast Snapshot",
+        description:
+          "Open-Meteo-backed current weather and short forecast snapshot for a WGS84 latitude/longitude pair.",
+        uri: "/api/weather/current?latitude=37.7749&longitude=-122.4194",
+        method: "GET",
+      },
+      {
+        id: "paid-current-weather-forecast-snapshot",
+        name: "Paid x402 Current Weather Forecast Snapshot",
+        description:
+          "Low-cost x402 endpoint returning current weather and daily forecast values from Open-Meteo for a WGS84 latitude/longitude pair.",
+        uri: "/api/x402/weather/current?latitude=37.7749&longitude=-122.4194",
+        method: "GET",
+      },
+      {
         id: "pyrimid-product-recommendations",
         name: "Pyrimid Product Recommendations",
         description:
@@ -904,6 +965,20 @@ app.use(
         mimeType: "application/json",
         extensions: repoSnapshotDiscoveryExtension(),
       },
+      "GET /api/x402/weather/current": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: WEATHER_CURRENT_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Paid current weather and short forecast snapshot for a latitude/longitude pair using Open-Meteo public forecast data.",
+        mimeType: "application/json",
+        extensions: weatherCurrentDiscoveryExtension(),
+      },
     },
     resourceServer,
   ),
@@ -962,6 +1037,14 @@ app.get("/api/x402/market/ohlcv", async (req, res, next) => {
 app.get("/api/x402/dev/repo-snapshot", async (req, res, next) => {
   try {
     res.json(await buildRepoSnapshot(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/x402/weather/current", async (req, res, next) => {
+  try {
+    res.json(await buildWeatherCurrent(req.query));
   } catch (error) {
     next(error);
   }
@@ -1078,6 +1161,94 @@ async function buildCryptoSnapshotFeed(query) {
       coinbaseBidAskAssets: assets.filter((asset) => asset.coinbaseUsd).length,
     },
     assets,
+    latencyMs: Date.now() - startedAt,
+  };
+}
+
+async function buildWeatherCurrent(query) {
+  const latitude = parseLatitude(query.latitude ?? query.lat);
+  const longitude = parseLongitude(query.longitude ?? query.lon ?? query.lng);
+  const forecastDays = parseWeatherForecastDays(query.forecast_days ?? query.days);
+  const temperatureUnit = parseWeatherUnit(
+    query.temperature_unit ?? query.temperatureUnit,
+    ["celsius", "fahrenheit"],
+    "celsius",
+    "temperature_unit",
+  );
+  const windSpeedUnit = parseWeatherUnit(
+    query.wind_speed_unit ?? query.windSpeedUnit,
+    ["kmh", "ms", "mph", "kn"],
+    "kmh",
+    "wind_speed_unit",
+  );
+  const startedAt = Date.now();
+  const url = new URL("/v1/forecast", OPEN_METEO_API);
+  url.searchParams.set("latitude", String(latitude));
+  url.searchParams.set("longitude", String(longitude));
+  url.searchParams.set(
+    "current",
+    [
+      "temperature_2m",
+      "relative_humidity_2m",
+      "apparent_temperature",
+      "precipitation",
+      "weather_code",
+      "wind_speed_10m",
+      "wind_direction_10m",
+    ].join(","),
+  );
+  url.searchParams.set(
+    "daily",
+    [
+      "temperature_2m_max",
+      "temperature_2m_min",
+      "precipitation_sum",
+      "precipitation_probability_max",
+    ].join(","),
+  );
+  url.searchParams.set("forecast_days", String(forecastDays));
+  url.searchParams.set("timezone", "auto");
+  url.searchParams.set("temperature_unit", temperatureUnit);
+  url.searchParams.set("wind_speed_unit", windSpeedUnit);
+
+  const forecast = await fetchJson(url, "Open-Meteo forecast");
+  const current = objectValue(forecast.current);
+  const daily = objectValue(forecast.daily);
+
+  return {
+    service: "Agent Commerce Desk Current Weather Forecast Snapshot",
+    version: serviceInfo.version,
+    generatedAt: new Date().toISOString(),
+    source: "Open-Meteo public forecast API",
+    request: {
+      latitude,
+      longitude,
+      forecastDays,
+      temperatureUnit,
+      windSpeedUnit,
+    },
+    location: {
+      latitude: Number(forecast.latitude ?? latitude),
+      longitude: Number(forecast.longitude ?? longitude),
+      timezone: forecast.timezone ?? null,
+      elevationMeters: numberOrNull(forecast.elevation),
+    },
+    current: {
+      time: current.time ?? null,
+      temperature: numberOrNull(current.temperature_2m),
+      relativeHumidityPct: numberOrNull(current.relative_humidity_2m),
+      apparentTemperature: numberOrNull(current.apparent_temperature),
+      precipitation: numberOrNull(current.precipitation),
+      weatherCode: numberOrNull(current.weather_code),
+      windSpeed: numberOrNull(current.wind_speed_10m),
+      windDirectionDegrees: numberOrNull(current.wind_direction_10m),
+      units: {
+        temperature: forecast.current_units?.temperature_2m ?? temperatureUnit,
+        precipitation: forecast.current_units?.precipitation ?? null,
+        windSpeed: forecast.current_units?.wind_speed_10m ?? windSpeedUnit,
+      },
+    },
+    daily: normalizeWeatherDaily(daily, forecast.daily_units),
     latencyMs: Date.now() - startedAt,
   };
 }
@@ -2105,6 +2276,69 @@ function parseDays(rawDays) {
   return days;
 }
 
+function parseLatitude(rawLatitude) {
+  const latitude = Number(rawLatitude);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+    const error = new Error("latitude must be a number between -90 and 90");
+    error.statusCode = 400;
+    throw error;
+  }
+  return Number(latitude.toFixed(6));
+}
+
+function parseLongitude(rawLongitude) {
+  const longitude = Number(rawLongitude);
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    const error = new Error("longitude must be a number between -180 and 180");
+    error.statusCode = 400;
+    throw error;
+  }
+  return Number(longitude.toFixed(6));
+}
+
+function parseWeatherForecastDays(rawDays) {
+  const days = Number(rawDays || 3);
+  if (!Number.isInteger(days) || days < 1 || days > 7) {
+    const error = new Error("forecast_days must be an integer between 1 and 7");
+    error.statusCode = 400;
+    throw error;
+  }
+  return days;
+}
+
+function parseWeatherUnit(rawUnit, allowed, fallback, name) {
+  const unit = String(rawUnit || fallback).toLowerCase();
+  if (!allowed.includes(unit)) {
+    const error = new Error(`${name} must be one of: ${allowed.join(", ")}`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return unit;
+}
+
+function normalizeWeatherDaily(daily, units = {}) {
+  const times = Array.isArray(daily.time) ? daily.time : [];
+  return times.map((date, index) => ({
+    date,
+    temperatureMax: numberOrNull(daily.temperature_2m_max?.[index]),
+    temperatureMin: numberOrNull(daily.temperature_2m_min?.[index]),
+    precipitationSum: numberOrNull(daily.precipitation_sum?.[index]),
+    precipitationProbabilityMaxPct: numberOrNull(
+      daily.precipitation_probability_max?.[index],
+    ),
+    units: {
+      temperature: units.temperature_2m_max ?? null,
+      precipitation: units.precipitation_sum ?? null,
+      precipitationProbability: units.precipitation_probability_max ?? null,
+    },
+  }));
+}
+
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 async function getDailyMarketCandles(pair, days) {
   const cacheKey = `${pair}:${days}`;
   const now = Date.now();
@@ -2461,6 +2695,14 @@ function x402Manifest() {
         mimeType: "application/json",
         accepts: [x402Accept(DEV_REPO_SNAPSHOT_X402_PRICE)],
       },
+      {
+        url: `${baseUrl()}/api/x402/weather/current?latitude=37.7749&longitude=-122.4194`,
+        method: "GET",
+        description:
+          "Paid current weather and short forecast snapshot for a WGS84 latitude/longitude pair using Open-Meteo public forecast data.",
+        mimeType: "application/json",
+        accepts: [x402Accept(WEATHER_CURRENT_X402_PRICE)],
+      },
     ],
   };
 }
@@ -2490,6 +2732,7 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/market/crypto-snapshot?limit=50
 - GET ${baseUrl()}/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 - GET ${baseUrl()}/api/dev/repo-snapshot?repo=vercel/next.js
+- GET ${baseUrl()}/api/weather/current?latitude=37.7749&longitude=-122.4194
 - GET ${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3
 - GET ${baseUrl()}/api/the402/services
 - GET ${baseUrl()}/.well-known/the402.json
@@ -2502,6 +2745,7 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/x402/market/crypto-snapshot?limit=50
 - GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 - GET ${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js
+- GET ${baseUrl()}/api/x402/weather/current?latitude=37.7749&longitude=-122.4194
 
 ## the402 provider webhook
 
@@ -2654,6 +2898,83 @@ function repoSnapshotDiscoveryExtension() {
       },
     },
   });
+}
+
+function weatherCurrentDiscoveryExtension() {
+  return declareDiscoveryExtension({
+    method: "GET",
+    input: { latitude: 37.7749, longitude: -122.4194, forecast_days: 3 },
+    inputSchema: weatherInputSchema(),
+    output: {
+      type: "json",
+      example: {
+        service: "Agent Commerce Desk Current Weather Forecast Snapshot",
+        source: "Open-Meteo public forecast API",
+        request: {
+          latitude: 37.7749,
+          longitude: -122.4194,
+          forecastDays: 3,
+          temperatureUnit: "celsius",
+          windSpeedUnit: "kmh",
+        },
+        current: {
+          time: "2026-05-24T12:00",
+          temperature: 18.2,
+          relativeHumidityPct: 72,
+          apparentTemperature: 17.5,
+          precipitation: 0,
+          weatherCode: 2,
+          windSpeed: 16.1,
+          windDirectionDegrees: 260,
+        },
+        daily: [
+          {
+            date: "2026-05-24",
+            temperatureMax: 19.8,
+            temperatureMin: 12.4,
+            precipitationSum: 0.1,
+            precipitationProbabilityMaxPct: 12,
+          },
+        ],
+      },
+    },
+  });
+}
+
+function weatherInputSchema() {
+  return {
+    type: "object",
+    required: ["latitude", "longitude"],
+    properties: {
+      latitude: {
+        type: "number",
+        minimum: -90,
+        maximum: 90,
+        description: "WGS84 latitude.",
+      },
+      longitude: {
+        type: "number",
+        minimum: -180,
+        maximum: 180,
+        description: "WGS84 longitude.",
+      },
+      forecast_days: {
+        type: "integer",
+        minimum: 1,
+        maximum: 7,
+        description: "Number of daily forecast rows to return.",
+      },
+      temperature_unit: {
+        type: "string",
+        enum: ["celsius", "fahrenheit"],
+      },
+      wind_speed_unit: {
+        type: "string",
+        enum: ["kmh", "ms", "mph", "kn"],
+      },
+    },
+    additionalProperties: false,
+  };
 }
 
 function walletAddressDiscoveryExtension({ pathParams = false, output }) {

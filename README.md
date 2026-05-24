@@ -34,9 +34,11 @@ POST /api/market/ohlcv
 POST /api/market/crypto-snapshot
 GET /api/dev/repo-snapshot?repo=owner/name
 POST /api/dev/repo-snapshot
+GET /api/weather/current?latitude=37.7749&longitude=-122.4194
 GET /api/x402/market/crypto-snapshot?limit=50
 GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/x402/dev/repo-snapshot?repo=owner/name
+GET /api/x402/weather/current?latitude=37.7749&longitude=-122.4194
 GET /api/pyrimid/recommend?need=paid%20mcp%20tool
 POST /api/pyrimid/recommend
 GET /.well-known/the402.json
@@ -106,6 +108,7 @@ Low-price x402 aliases are available for API directories that require direct
 GET /api/x402/market/crypto-snapshot?limit=50  # $0.01
 GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365  # $0.02
 GET /api/x402/dev/repo-snapshot?repo=vercel/next.js  # $0.05
+GET /api/x402/weather/current?latitude=37.7749&longitude=-122.4194  # $0.01
 ```
 
 The free wallet preview also accepts POST bodies such as
@@ -171,6 +174,7 @@ curl -X POST http://localhost:4021/api/preview \
 curl 'http://localhost:4021/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
 curl 'http://localhost:4021/api/market/crypto-snapshot?limit=50'
 curl 'http://localhost:4021/api/dev/repo-snapshot?repo=vercel/next.js'
+curl 'http://localhost:4021/api/weather/current?latitude=37.7749&longitude=-122.4194'
 curl -X POST http://localhost:4021/api/market/crypto-snapshot \
   -H 'content-type: application/json' \
   -d '{"limit": 3}'
