@@ -116,9 +116,11 @@ const serviceInfo = {
     free: [
       "GET /health",
       "GET /manifest",
+      "GET /openapi.json",
       "GET /.well-known/agent-card.json",
       "GET /.well-known/x402",
       "GET /.well-known/x402.json",
+      "GET /favicon.svg",
       "GET /llms.txt",
       "GET /api/800402/preview",
       "GET /api/preview?address=0x...",
@@ -249,6 +251,10 @@ app.get("/health", (_req, res) => {
 
 app.get("/manifest", (_req, res) => {
   res.json(serviceInfo);
+});
+
+app.get("/openapi.json", (_req, res) => {
+  res.json(openApiDocument());
 });
 
 app.get("/api/800402/preview", (_req, res) => {
@@ -892,6 +898,10 @@ app.get("/llms.txt", (_req, res) => {
 
 app.get("/wallet-sign", (_req, res) => {
   res.sendFile(join(PUBLIC_DIR, "wallet-sign.html"));
+});
+
+app.get("/favicon.ico", (_req, res) => {
+  res.redirect(302, "/favicon.svg");
 });
 
 app.use(express.static(PUBLIC_DIR));
@@ -2742,6 +2752,218 @@ function x402Manifest() {
       },
     ],
   };
+}
+
+function openApiDocument() {
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: serviceInfo.name,
+      version: serviceInfo.version,
+      description: serviceInfo.description,
+      "x-guidance":
+        "Use GET endpoints with x402 exact payment on Base mainnet USDC. Runtime 402 responses are authoritative for payTo, asset, amount, and facilitator details.",
+    },
+    servers: [{ url: baseUrl() }],
+    "x-agentcash-provenance": {
+      ownershipProofs: [],
+    },
+    "x-agentcash-guidance": {
+      llmsTxtUrl: `${baseUrl()}/llms.txt`,
+    },
+    paths: {
+      "/api/readiness": {
+        get: paidOpenApiOperation({
+          operationId: "getPaidWalletReadiness",
+          summary: "Paid Base wallet readiness report",
+          description:
+            "Returns ETH balance, native USDC balance, transaction count, token transfers, and contract status for a Base wallet.",
+          price: PRICE,
+          parameters: [addressQueryParameter()],
+          outputExample: readinessBazaarOutput().example,
+        }),
+      },
+      "/api/agent-commerce-receipt": {
+        get: paidOpenApiOperation({
+          operationId: "getPaidAgentCommerceReceipt",
+          summary: "Paid agent commerce readiness receipt",
+          description:
+            "Returns an 800402-style agent commerce receipt combining identity metadata, x402 payment terms, and wallet-readiness evidence.",
+          price: PRICE,
+          parameters: [addressQueryParameter()],
+          outputExample: receiptBazaarOutput().example,
+        }),
+      },
+      "/api/x402/market/crypto-snapshot": {
+        get: paidOpenApiOperation({
+          operationId: "getPaidCryptoSnapshot",
+          summary: "Paid top crypto market snapshot",
+          description:
+            "Returns ranked crypto market data with price, market cap, 24h volume/change, and Coinbase bid/ask where available.",
+          price: MARKET_SNAPSHOT_X402_PRICE,
+          parameters: [
+            {
+              name: "limit",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 50, default: 50 },
+              description: "Number of ranked assets to return.",
+            },
+          ],
+          outputExample: bazaarOutputExample(marketSnapshotDiscoveryExtension()),
+        }),
+      },
+      "/api/x402/market/ohlcv": {
+        get: paidOpenApiOperation({
+          operationId: "getPaidMarketOhlcv",
+          summary: "Paid daily OHLCV market feed",
+          description:
+            "Returns Coinbase Exchange daily OHLCV candles for supported USD pairs.",
+          price: MARKET_OHLCV_X402_PRICE,
+          parameters: [
+            {
+              name: "pairs",
+              in: "query",
+              required: false,
+              schema: {
+                type: "string",
+                default: "BTC-USD,ETH-USD",
+                example: "BTC-USD,ETH-USD",
+              },
+              description:
+                "Comma-separated Coinbase pairs. Supported: BTC-USD, ETH-USD, SOL-USD.",
+            },
+            {
+              name: "days",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 365, default: 365 },
+            },
+          ],
+          outputExample: bazaarOutputExample(marketOhlcvDiscoveryExtension()),
+        }),
+      },
+      "/api/x402/dev/repo-snapshot": {
+        get: paidOpenApiOperation({
+          operationId: "getPaidRepoSnapshot",
+          summary: "Paid GitHub repo intelligence snapshot",
+          description:
+            "Returns repository metadata, language breakdown, recent commits, latest release, and agent-scoping signals for a public GitHub repository.",
+          price: DEV_REPO_SNAPSHOT_X402_PRICE,
+          parameters: [
+            {
+              name: "repo",
+              in: "query",
+              required: true,
+              schema: {
+                type: "string",
+                pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+                example: "vercel/next.js",
+              },
+              description: "Public GitHub repository slug.",
+            },
+          ],
+          outputExample: bazaarOutputExample(repoSnapshotDiscoveryExtension()),
+        }),
+      },
+      "/api/x402/weather/current": {
+        get: paidOpenApiOperation({
+          operationId: "getPaidCurrentWeather",
+          summary: "Paid current weather forecast snapshot",
+          description:
+            "Returns current weather and a short daily forecast for a WGS84 latitude/longitude pair using Open-Meteo public forecast data.",
+          price: WEATHER_CURRENT_X402_PRICE,
+          parameters: [
+            {
+              name: "latitude",
+              in: "query",
+              required: true,
+              schema: { type: "number", minimum: -90, maximum: 90, example: 37.7749 },
+            },
+            {
+              name: "longitude",
+              in: "query",
+              required: true,
+              schema: { type: "number", minimum: -180, maximum: 180, example: -122.4194 },
+            },
+            {
+              name: "forecast_days",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 7, default: 3 },
+            },
+          ],
+          outputExample: bazaarOutputExample(weatherCurrentDiscoveryExtension()),
+        }),
+      },
+    },
+  };
+}
+
+function paidOpenApiOperation({
+  operationId,
+  summary,
+  description,
+  price,
+  parameters = [],
+  outputExample,
+}) {
+  return {
+    operationId,
+    summary,
+    description,
+    parameters,
+    security: [],
+    "x-payment-info": {
+      price: {
+        mode: "fixed",
+        currency: "USD",
+        amount: priceUsd(price).toFixed(2),
+      },
+      protocols: [{ x402: {} }],
+      network: NETWORK,
+      asset: USDC_CONTRACT,
+      payTo: PAY_TO,
+      facilitator: ACTIVE_FACILITATOR_URL,
+    },
+    responses: {
+      200: {
+        description: "Paid JSON response after a valid x402 payment.",
+        content: {
+          "application/json": {
+            schema: { type: "object", additionalProperties: true },
+            example: outputExample,
+          },
+        },
+      },
+      402: {
+        description: "x402 payment challenge.",
+        content: {
+          "application/json": {
+            schema: { type: "object", additionalProperties: true },
+          },
+        },
+      },
+    },
+  };
+}
+
+function addressQueryParameter() {
+  return {
+    name: "address",
+    in: "query",
+    required: true,
+    schema: {
+      type: "string",
+      pattern: "^0x[a-fA-F0-9]{40}$",
+      example: SAMPLE_ADDRESS,
+    },
+    description: "EVM wallet address on Base.",
+  };
+}
+
+function bazaarOutputExample(extension) {
+  return extension?.bazaar?.info?.output?.example ?? {};
 }
 
 function llmsTxt() {
