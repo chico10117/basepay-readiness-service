@@ -145,6 +145,7 @@ const serviceInfo = {
       "GET /open-frame",
       "POST /open-frame",
       "GET /open-frame.svg",
+      "GET /xmtp-bounty-dm",
       "GET /wallet-sign",
     ],
     paid: [
@@ -239,6 +240,7 @@ const serviceInfo = {
     the402Services: "/api/the402/services",
     the402Webhook: "/api/the402/webhook",
     openFrame: "/open-frame",
+    xmtpBountyDmHelper: "/xmtp-bounty-dm",
   },
   pyrimid: {
     integrationPath: "embedded_resolver",
@@ -902,6 +904,10 @@ app.get("/llms.txt", (_req, res) => {
 
 app.get("/wallet-sign", (_req, res) => {
   res.sendFile(join(PUBLIC_DIR, "wallet-sign.html"));
+});
+
+app.get("/xmtp-bounty-dm", (_req, res) => {
+  res.sendFile(join(PUBLIC_DIR, "xmtp-bounty-dm.html"));
 });
 
 app.get("/open-frame", (_req, res) => {
@@ -3009,6 +3015,7 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/.well-known/the402.json
 - GET ${baseUrl()}/api/the402/webhook
 - GET ${baseUrl()}/open-frame
+- GET ${baseUrl()}/xmtp-bounty-dm
 
 ## Paid x402 endpoints
 

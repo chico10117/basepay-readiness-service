@@ -51,6 +51,7 @@ POST /api/the402/webhook
 GET /open-frame
 POST /open-frame
 GET /open-frame.svg
+GET /xmtp-bounty-dm
 GET /.well-known/x402
 GET /.well-known/x402.json
 GET /llms.txt
@@ -195,6 +196,7 @@ curl http://localhost:4021/api/the402/services
 curl http://localhost:4021/.well-known/the402.json
 curl http://localhost:4021/.well-known/402index-verify.txt
 curl http://localhost:4021/open-frame
+curl http://localhost:4021/xmtp-bounty-dm
 curl -X POST http://localhost:4021/api/the402/webhook \
   -H 'content-type: application/json' \
   -d '{"event":"webhook_test"}'
