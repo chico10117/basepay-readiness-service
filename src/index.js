@@ -68,6 +68,51 @@ const PUBLIC_URL = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL) : nu
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 const MARKET_ALLOWED_PAIRS = new Set(["BTC-USD", "ETH-USD", "SOL-USD"]);
 const MARKET_CACHE = new Map();
+const PAID_ROUTE_PREFIXES = [
+  "/api/readiness",
+  "/api/agent-commerce-receipt",
+  "/api/x402/market/crypto-snapshot",
+  "/api/x402/market/ohlcv",
+  "/api/x402/dev/repo-snapshot",
+  "/api/x402/weather/current",
+];
+const PAYMENT_REQUEST_HEADERS = [
+  "Authorization",
+  "Content-Type",
+  "PAYMENT",
+  "Payment",
+  "PAYMENT-SIGNATURE",
+  "Payment-Signature",
+  "X-PAYMENT",
+  "X-Payment",
+  "X-PAYMENT-RESPONSE",
+  "X-Payment-Response",
+  "X-402-PAYMENT",
+  "X-402-Payment",
+  "X402-PAYMENT",
+  "X402-Payment",
+];
+const PAYMENT_RESPONSE_HEADERS = [
+  "WWW-Authenticate",
+  "Payment",
+  "PAYMENT",
+  "Payment-Signature",
+  "PAYMENT-SIGNATURE",
+  "X-Payment",
+  "X-PAYMENT",
+  "X-Payment-Response",
+  "X-PAYMENT-RESPONSE",
+  "X-402-Payment",
+  "X-402-PAYMENT",
+  "X402-Payment",
+  "X402-PAYMENT",
+  "X-Payment-Required",
+  "X-PAYMENT-REQUIRED",
+  "Payment-Required",
+  "PAYMENT-REQUIRED",
+  "X-Accepted-Payment",
+  "X-ACCEPTED-PAYMENT",
+];
 
 const facilitatorClient =
   USE_CDP_FACILITATOR
@@ -924,6 +969,23 @@ app.get("/favicon.ico", (_req, res) => {
 
 app.use(express.static(PUBLIC_DIR));
 
+app.use((req, res, next) => {
+  if (!isPaidRoutePath(req.path)) {
+    next();
+    return;
+  }
+
+  attachPaidRouteBrowserHeaders(req, res);
+  forcePaidRouteFinalHeaders(req, res);
+
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+
+  next();
+});
+
 app.use(
   paymentMiddleware(
     {
@@ -1110,8 +1172,11 @@ app.get("/api/x402/weather/current", async (req, res, next) => {
   }
 });
 
-app.use((error, _req, res, _next) => {
+app.use((error, req, res, _next) => {
   const status = error.statusCode ?? error.status ?? 500;
+  if (status === 402 || isPaidRoutePath(req.path)) {
+    attachPaidRouteBrowserHeaders(req, res);
+  }
   res.status(status).json({
     error: error.message ?? "Unexpected server error",
   });
@@ -1136,6 +1201,60 @@ function requireMarketApiKey(req) {
     error.statusCode = 401;
     throw error;
   }
+}
+
+function isPaidRoutePath(pathname) {
+  return PAID_ROUTE_PREFIXES.some(
+    prefix => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function attachPaidRouteBrowserHeaders(req, res) {
+  const origin = req.get("origin");
+  res.set("Access-Control-Allow-Origin", origin || "*");
+  if (origin) {
+    res.vary("Origin");
+  }
+  res.vary("Access-Control-Request-Headers");
+  res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.set("Access-Control-Allow-Headers", corsAllowHeaders(req));
+  res.set("Access-Control-Expose-Headers", PAYMENT_RESPONSE_HEADERS.join(", "));
+  res.set("Cache-Control", "private, no-store");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+}
+
+function corsAllowHeaders(req) {
+  return uniqueHeaderList([
+    ...PAYMENT_REQUEST_HEADERS,
+    ...String(req.get("access-control-request-headers") ?? "")
+      .split(",")
+      .map(header => header.trim())
+      .filter(Boolean),
+  ]);
+}
+
+function uniqueHeaderList(headers) {
+  const seen = new Set();
+  const unique = [];
+  for (const header of headers) {
+    const key = header.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(header);
+    }
+  }
+  return unique.join(", ");
+}
+
+function forcePaidRouteFinalHeaders(req, res) {
+  const originalWriteHead = res.writeHead.bind(res);
+  res.writeHead = (statusCode, ...args) => {
+    if (statusCode === 402 || isPaidRoutePath(req.path)) {
+      attachPaidRouteBrowserHeaders(req, res);
+    }
+    return originalWriteHead(statusCode, ...args);
+  };
 }
 
 function bodyToQuery(body) {
