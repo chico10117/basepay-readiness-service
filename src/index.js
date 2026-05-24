@@ -1337,6 +1337,9 @@ function forcePaidRouteFinalHeaders(req, res) {
     if (statusCode === 402 || isPaidRoutePath(req.path)) {
       attachPaidRouteBrowserHeaders(req, res);
     }
+    if (statusCode === 402 && !res.getHeader("WWW-Authenticate")) {
+      res.setHeader("WWW-Authenticate", "x402");
+    }
     return originalWriteHead(statusCode, ...args);
   };
 }
