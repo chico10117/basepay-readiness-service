@@ -35,6 +35,7 @@ POST /api/market/crypto-snapshot
 GET /api/dev/repo-snapshot?repo=owner/name
 POST /api/dev/repo-snapshot
 GET /api/weather/current?latitude=37.7749&longitude=-122.4194
+GET /api/tools402/services/integration-triage?repository_or_url=...&goal=...
 POST /api/tools402/services/integration-triage
 GET /api/agentmint/weather-current
 POST /api/agentmint/weather-current
@@ -136,9 +137,10 @@ Facilitator support is initialized lazily on paid routes. If the facilitator is
 temporarily unavailable, paid routes return a controlled `502` instead of
 crashing free pages or metadata routes.
 
-`POST /api/tools402/services/integration-triage` is a normal `200` JSON
-upstream for tools402 proxy listings. The tools402 proxy handles buyer payment
-before forwarding the same intake fields to this upstream.
+`GET /api/tools402/services/integration-triage` and
+`POST /api/tools402/services/integration-triage` are normal `200` JSON
+upstreams for tools402 proxy listings. The tools402 proxy handles buyer payment
+before forwarding the same intake fields to these upstreams.
 
 The free wallet preview also accepts POST bodies such as
 `{"address":"0x..."}`. POST helpers unwrap AgentMint-style bodies such as

@@ -418,6 +418,14 @@ app.post("/api/tools402/services/integration-triage", async (req, res, next) => 
   }
 });
 
+app.get("/api/tools402/services/integration-triage", async (req, res, next) => {
+  try {
+    res.json(buildTools402IntegrationTriageIntake(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/agentmint/weather-current", async (req, res, next) => {
   try {
     if (req.query.challenge) {
