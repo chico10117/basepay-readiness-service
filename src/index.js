@@ -20,10 +20,14 @@ const MARKET_SNAPSHOT_X402_PRICE =
   process.env.MARKET_SNAPSHOT_X402_PRICE ?? "$0.01";
 const MARKET_OHLCV_X402_PRICE =
   process.env.MARKET_OHLCV_X402_PRICE ?? "$0.02";
+const DEV_REPO_SNAPSHOT_X402_PRICE =
+  process.env.DEV_REPO_SNAPSHOT_X402_PRICE ?? "$0.05";
 const BASE_RPC = process.env.BASE_RPC ?? "https://mainnet.base.org";
 const COINBASE_EXCHANGE_API =
   process.env.COINBASE_EXCHANGE_API ?? "https://api.exchange.coinbase.com";
 const COINGECKO_API = process.env.COINGECKO_API ?? "https://api.coingecko.com";
+const GITHUB_API = process.env.GITHUB_API ?? "https://api.github.com";
+const GITHUB_PUBLIC_API_TOKEN = process.env.GITHUB_PUBLIC_API_TOKEN ?? "";
 const BLOCKSCOUT = process.env.BLOCKSCOUT ?? "https://base.blockscout.com";
 const USDC_CONTRACT =
   process.env.USDC_CONTRACT ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -31,6 +35,9 @@ const MARKET_FEED_API_KEY = process.env.MARKET_FEED_API_KEY ?? "";
 const MARKET_CACHE_TTL_SECONDS = Number(process.env.MARKET_CACHE_TTL_SECONDS ?? "900");
 const MARKET_SNAPSHOT_CACHE_TTL_SECONDS = Number(
   process.env.MARKET_SNAPSHOT_CACHE_TTL_SECONDS ?? "60",
+);
+const DEV_REPO_CACHE_TTL_SECONDS = Number(
+  process.env.DEV_REPO_CACHE_TTL_SECONDS ?? "300",
 );
 const THE402_API_KEY = process.env.THE402_API_KEY ?? "";
 const THE402_WEBHOOK_SECRET = process.env.THE402_WEBHOOK_SECRET ?? "";
@@ -85,9 +92,9 @@ app.use(
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.8.0",
+  version: "0.9.0",
   description:
-    "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
+    "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
   acceptedPayment: {
     asset: "native USDC",
@@ -115,6 +122,8 @@ const serviceInfo = {
       "GET /api/market/crypto-snapshot?limit=50",
       "POST /api/market/ohlcv",
       "POST /api/market/crypto-snapshot",
+      "GET /api/dev/repo-snapshot?repo=owner/name",
+      "POST /api/dev/repo-snapshot",
       "GET /api/pyrimid/recommend?need=paid%20mcp%20tool",
       "POST /api/pyrimid/recommend",
       "GET /.well-known/the402.json",
@@ -130,6 +139,7 @@ const serviceInfo = {
       "GET /api/agent-commerce-receipt/:address",
       "GET /api/x402/market/crypto-snapshot?limit=50",
       "GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
+      "GET /api/x402/dev/repo-snapshot?repo=owner/name",
     ],
   },
   input: {
@@ -195,9 +205,20 @@ const serviceInfo = {
         "60-second cache and API-key option",
       ],
     },
+    {
+      name: "GitHub repo intelligence snapshot",
+      priceUsd: 75,
+      deliverables: [
+        "repo metadata and activity summary",
+        "language and dependency signals",
+        "recent commit and release context",
+        "machine-readable scoping notes",
+      ],
+    },
   ],
   tools: {
     walletSignatureHelper: "/wallet-sign",
+    repoSnapshot: "/api/dev/repo-snapshot",
     pyrimidRecommendations: "/api/pyrimid/recommend",
     the402Services: "/api/the402/services",
     the402Webhook: "/api/the402/webhook",
@@ -275,6 +296,22 @@ app.post("/api/market/crypto-snapshot", async (req, res, next) => {
   try {
     requireMarketApiKey(req);
     res.json(await buildCryptoSnapshotFeed(bodyToQuery(req.body)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/dev/repo-snapshot", async (req, res, next) => {
+  try {
+    res.json(await buildRepoSnapshot(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/dev/repo-snapshot", async (req, res, next) => {
+  try {
+    res.json(await buildRepoSnapshot(bodyToQuery(req.body)));
   } catch (error) {
     next(error);
   }
@@ -472,6 +509,49 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         },
       },
       {
+        name: "github_repo_intelligence_snapshot",
+        endpoint: "/api/dev/repo-snapshot",
+        method: "GET",
+        payment: {
+          mode: "free_preview",
+          settlement: "paid x402 endpoint or service agreement for repeated use",
+          payTo: PAY_TO,
+        },
+        endpointUrl: "/api/dev/repo-snapshot?repo=vercel/next.js",
+        inputSchema: {
+          type: "object",
+          required: ["repo"],
+          properties: {
+            repo: {
+              type: "string",
+              pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+              example: "vercel/next.js",
+            },
+          },
+        },
+      },
+      {
+        name: "paid_github_repo_intelligence_snapshot",
+        endpoint: "/api/x402/dev/repo-snapshot",
+        method: "GET",
+        payment: x402Info(
+          "/api/x402/dev/repo-snapshot?repo=vercel/next.js",
+          DEV_REPO_SNAPSHOT_X402_PRICE,
+        ),
+        endpointUrl: "/api/x402/dev/repo-snapshot?repo=vercel/next.js",
+        inputSchema: {
+          type: "object",
+          required: ["repo"],
+          properties: {
+            repo: {
+              type: "string",
+              pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+              example: "vercel/next.js",
+            },
+          },
+        },
+      },
+      {
         name: "target_wallet_signature_helper",
         endpoint: "/wallet-sign",
         method: "GET",
@@ -644,6 +724,22 @@ app.get("/.well-known/agent.json", (_req, res) => {
         method: "GET",
       },
       {
+        id: "github-repo-intelligence-snapshot",
+        name: "GitHub Repo Intelligence Snapshot",
+        description:
+          "Machine-readable public GitHub repo snapshot for agent scoping: metadata, languages, recent commits, latest release, and dependency signals.",
+        uri: "/api/dev/repo-snapshot?repo=vercel/next.js",
+        method: "GET",
+      },
+      {
+        id: "paid-github-repo-intelligence-snapshot",
+        name: "Paid x402 GitHub Repo Intelligence Snapshot",
+        description:
+          "Low-cost x402 developer-tool endpoint returning a public GitHub repo intelligence snapshot for agents and buyers.",
+        uri: "/api/x402/dev/repo-snapshot?repo=vercel/next.js",
+        method: "GET",
+      },
+      {
         id: "pyrimid-product-recommendations",
         name: "Pyrimid Product Recommendations",
         description:
@@ -787,6 +883,20 @@ app.use(
         mimeType: "application/json",
         extensions: marketOhlcvDiscoveryExtension(),
       },
+      "GET /api/x402/dev/repo-snapshot": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: DEV_REPO_SNAPSHOT_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Paid GitHub repo intelligence snapshot for agent scoping: metadata, languages, recent commits, release, and dependency signals.",
+        mimeType: "application/json",
+        extensions: repoSnapshotDiscoveryExtension(),
+      },
     },
     resourceServer,
   ),
@@ -837,6 +947,14 @@ app.get("/api/x402/market/crypto-snapshot", async (req, res, next) => {
 app.get("/api/x402/market/ohlcv", async (req, res, next) => {
   try {
     res.json(await buildMarketOhlcvFeed(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/x402/dev/repo-snapshot", async (req, res, next) => {
+  try {
+    res.json(await buildRepoSnapshot(req.query));
   } catch (error) {
     next(error);
   }
@@ -955,6 +1073,109 @@ async function buildCryptoSnapshotFeed(query) {
     assets,
     latencyMs: Date.now() - startedAt,
   };
+}
+
+async function buildRepoSnapshot(query) {
+  const repo = parseRepoSlug(query.repo ?? query.repository ?? query.url);
+  const cacheKey = `github:repo:${repo.toLowerCase()}`;
+  const now = Date.now();
+  const cached = MARKET_CACHE.get(cacheKey);
+  if (cached?.expiresAt > now) {
+    return {
+      ...cached.value,
+      cache: { ...cached.value.cache, hit: true },
+      latencyMs: 0,
+    };
+  }
+
+  const startedAt = Date.now();
+  const [owner, name] = repo.split("/");
+  const repository = await fetchGitHubJson(
+    `/repos/${owner}/${name}`,
+    `GitHub repository ${repo}`,
+  );
+  const defaultBranch = String(repository.default_branch || "main");
+  const [languages, commits, latestRelease, packageJson] = await Promise.all([
+    fetchGitHubJson(`/repos/${owner}/${name}/languages`, `GitHub languages ${repo}`)
+      .catch(() => ({})),
+    fetchGitHubJson(
+      `/repos/${owner}/${name}/commits?per_page=5&sha=${encodeURIComponent(defaultBranch)}`,
+      `GitHub commits ${repo}`,
+    ).catch(() => []),
+    fetchGitHubJson(`/repos/${owner}/${name}/releases/latest`, `GitHub release ${repo}`)
+      .catch((error) => {
+        if (error.statusCode === 404) return null;
+        throw error;
+      }),
+    fetchGitHubPackageJson(owner, name, defaultBranch),
+  ]);
+  const report = {
+    service: "Agent Commerce Desk GitHub Repo Intelligence Snapshot",
+    version: serviceInfo.version,
+    generatedAt: new Date().toISOString(),
+    source: "GitHub public REST API",
+    request: { repo },
+    repository: {
+      fullName: repository.full_name,
+      htmlUrl: repository.html_url,
+      description: repository.description,
+      defaultBranch,
+      visibility: repository.visibility ?? (repository.private ? "private" : "public"),
+      archived: Boolean(repository.archived),
+      disabled: Boolean(repository.disabled),
+      fork: Boolean(repository.fork),
+      stars: Number(repository.stargazers_count ?? 0),
+      forks: Number(repository.forks_count ?? 0),
+      watchers: Number(repository.watchers_count ?? 0),
+      openIssues: Number(repository.open_issues_count ?? 0),
+      license: repository.license?.spdx_id ?? null,
+      topics: Array.isArray(repository.topics) ? repository.topics.slice(0, 20) : [],
+      pushedAt: repository.pushed_at,
+      updatedAt: repository.updated_at,
+      createdAt: repository.created_at,
+    },
+    languages: summarizeLanguages(languages),
+    recentCommits: summarizeCommits(commits),
+    latestRelease: latestRelease
+      ? {
+          tagName: latestRelease.tag_name,
+          name: latestRelease.name,
+          draft: Boolean(latestRelease.draft),
+          prerelease: Boolean(latestRelease.prerelease),
+          publishedAt: latestRelease.published_at,
+          htmlUrl: latestRelease.html_url,
+        }
+      : null,
+    packageJson,
+    agentScoping: {
+      suggestedFirstChecks: [
+        "Read README and package/workspace manifests",
+        "Run the narrowest available lint/type/test command",
+        "Inspect open issues before proposing a patch",
+      ],
+      riskSignals: repoRiskSignals(repository, commits, packageJson),
+      paidEndpoint:
+        `${baseUrl()}/api/x402/dev/repo-snapshot?repo=${encodeURIComponent(repo)}`,
+    },
+    payment: {
+      directX402Price: DEV_REPO_SNAPSHOT_X402_PRICE,
+      asset: "native USDC",
+      network: "Base",
+      payTo: PAY_TO,
+    },
+    cache: {
+      ttlSeconds: DEV_REPO_CACHE_TTL_SECONDS,
+      strategy: "in-memory per deployment instance",
+      hit: false,
+    },
+    latencyMs: Date.now() - startedAt,
+  };
+
+  MARKET_CACHE.set(cacheKey, {
+    expiresAt: now + DEV_REPO_CACHE_TTL_SECONDS * 1000,
+    value: report,
+  });
+  return report;
 }
 
 async function buildPyrimidRecommendations(query) {
@@ -1101,6 +1322,22 @@ async function buildThe402Deliverables(serviceKey, brief) {
     };
   }
 
+  if (serviceKey === "repo_snapshot") {
+    const report = await buildRepoSnapshot({
+      repo:
+        brief.repo ??
+        brief.repository ??
+        brief.github_repo ??
+        brief.repository_url ??
+        brief.url,
+    });
+    return {
+      autoComplete: true,
+      deliverableType: "repo_snapshot",
+      report,
+    };
+  }
+
   if (serviceKey === "wallet_readiness") {
     const address = String(brief.address ?? brief.wallet ?? brief.target_wallet ?? "");
     const report = await buildReadinessReport(address || SAMPLE_ADDRESS);
@@ -1162,7 +1399,10 @@ function buildThe402Quote(serviceKey, payload) {
   const service =
     the402ServiceDefinitions().find((definition) =>
       inferThe402ServiceKey(definition) === serviceKey
-    ) ?? the402ServiceDefinitions()[3];
+    ) ??
+    the402ServiceDefinitions().find((definition) =>
+      inferThe402ServiceKey(definition) === "implementation_triage"
+    );
 
   return {
     service: service.name,
@@ -1224,6 +1464,17 @@ function the402Brief(payload) {
 function inferThe402ServiceKey(payload) {
   const haystack = JSON.stringify(payload).toLowerCase();
 
+  if (
+    haystack.includes("repo intelligence") ||
+    haystack.includes("repo snapshot") ||
+    haystack.includes("repository snapshot") ||
+    haystack.includes("github repo") ||
+    haystack.includes("\"repo\"") ||
+    haystack.includes("\"repository\"") ||
+    haystack.includes("\"github_repo\"")
+  ) {
+    return "repo_snapshot";
+  }
   if (
     haystack.includes("triage") ||
     haystack.includes("integration") ||
@@ -1372,6 +1623,36 @@ function the402ServiceDefinitions() {
       },
     },
     {
+      name: "GitHub Repo Intelligence Snapshot API",
+      description:
+        "Instant public GitHub repo snapshot for agent scoping: repo metadata, language mix, recent commits, latest release, root package.json signals, and risk flags.",
+      price: { fixed: "$0.15" },
+      pricing_model: "fixed",
+      service_type: "developer_tool_api",
+      fulfillment_type: "instant",
+      estimated_delivery: "10s",
+      category: "development",
+      tags: ["github", "repo-intelligence", "developer-tools", "code-review", "x402"],
+      webhook_url: webhookUrl,
+      input_schema: {
+        type: "object",
+        required: ["repo"],
+        properties: {
+          repo: {
+            type: "string",
+            pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+            description: "Public GitHub repository slug, for example vercel/next.js.",
+          },
+        },
+      },
+      deliverable_schema: {
+        type: "object",
+        properties: {
+          report: { type: "object" },
+        },
+      },
+    },
+    {
       name: "Base USDC x402 Integration Triage",
       description:
         "Same-day implementation triage for a Base USDC/x402 endpoint, marketplace listing, webhook, or receipt verifier. Returns findings, proof links, and a concrete patch plan.",
@@ -1421,6 +1702,20 @@ function parseSnapshotLimit(rawLimit) {
     throw error;
   }
   return limit;
+}
+
+function parseRepoSlug(rawRepo) {
+  const value = String(rawRepo || "").trim();
+  const match = value.match(
+    /^(?:https?:\/\/github\.com\/)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:\/.*)?$/,
+  );
+  if (!match) {
+    const error = new Error("repo must be a GitHub repository slug like owner/name");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return `${match[1]}/${match[2].replace(/\.git$/, "")}`;
 }
 
 function parsePyrimidNeed(rawNeed) {
@@ -1504,6 +1799,129 @@ function toPyrimidRecommendation(product, index) {
         "HTTP 402 with Base USDC x402 payment requirements before buyer-side payment",
     },
   };
+}
+
+async function fetchGitHubPackageJson(owner, name, defaultBranch) {
+  try {
+    const file = await fetchGitHubJson(
+      `/repos/${owner}/${name}/contents/package.json?ref=${encodeURIComponent(defaultBranch)}`,
+      `GitHub package.json ${owner}/${name}`,
+    );
+    if (file?.encoding !== "base64" || typeof file.content !== "string") return null;
+    const parsed = JSON.parse(
+      Buffer.from(file.content.replace(/\s/g, ""), "base64").toString("utf8"),
+    );
+    return summarizePackageJson(parsed);
+  } catch (error) {
+    if (error.statusCode === 404 || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+function summarizeLanguages(languages) {
+  const entries = Object.entries(objectValue(languages))
+    .filter(([, bytes]) => Number.isFinite(Number(bytes)) && Number(bytes) > 0)
+    .sort((left, right) => Number(right[1]) - Number(left[1]));
+  const totalBytes = entries.reduce((sum, [, bytes]) => sum + Number(bytes), 0);
+
+  return {
+    totalBytes,
+    primary: entries[0]?.[0] ?? null,
+    breakdown: entries.slice(0, 8).map(([language, bytes]) => ({
+      language,
+      bytes: Number(bytes),
+      percent:
+        totalBytes > 0 ? Number(((Number(bytes) / totalBytes) * 100).toFixed(2)) : 0,
+    })),
+  };
+}
+
+function summarizeCommits(commits) {
+  return (Array.isArray(commits) ? commits : []).slice(0, 5).map((commit) => ({
+    sha: String(commit.sha ?? "").slice(0, 12),
+    message: firstLine(commit.commit?.message, 180),
+    authorName: commit.commit?.author?.name ?? commit.author?.login ?? null,
+    committedAt: commit.commit?.author?.date ?? null,
+    htmlUrl: commit.html_url ?? null,
+  }));
+}
+
+function summarizePackageJson(pkg) {
+  const scripts = objectValue(pkg.scripts);
+  const dependencyGroups = {
+    dependencies: objectValue(pkg.dependencies),
+    devDependencies: objectValue(pkg.devDependencies),
+    peerDependencies: objectValue(pkg.peerDependencies),
+    optionalDependencies: objectValue(pkg.optionalDependencies),
+  };
+  const dependencyNames = Object.values(dependencyGroups).flatMap((group) =>
+    Object.keys(group)
+  );
+
+  return {
+    name: typeof pkg.name === "string" ? pkg.name : null,
+    version: typeof pkg.version === "string" ? pkg.version : null,
+    type: typeof pkg.type === "string" ? pkg.type : null,
+    packageManager:
+      typeof pkg.packageManager === "string" ? pkg.packageManager : null,
+    scripts: Object.keys(scripts).sort().slice(0, 20),
+    dependencyCounts: Object.fromEntries(
+      Object.entries(dependencyGroups).map(([group, values]) => [
+        group,
+        Object.keys(values).length,
+      ]),
+    ),
+    notableDependencies: dependencyNames
+      .filter((name) =>
+        [
+          "@vercel/ai",
+          "ai",
+          "express",
+          "fastify",
+          "hono",
+          "jest",
+          "next",
+          "playwright",
+          "react",
+          "tailwindcss",
+          "typescript",
+          "vite",
+          "vitest",
+          "vue",
+        ].includes(name)
+      )
+      .sort(),
+  };
+}
+
+function repoRiskSignals(repository, commits, packageJson) {
+  const signals = [];
+  const lastPushMs = Date.parse(repository.pushed_at ?? "");
+  const daysSincePush = Number.isFinite(lastPushMs)
+    ? Math.floor((Date.now() - lastPushMs) / (24 * 60 * 60 * 1000))
+    : null;
+
+  if (repository.archived) signals.push("repository_archived");
+  if (repository.disabled) signals.push("repository_disabled");
+  if (Number(repository.open_issues_count ?? 0) > 1000) {
+    signals.push("high_open_issue_count");
+  }
+  if (daysSincePush != null && daysSincePush > 365) {
+    signals.push("stale_default_branch_activity");
+  }
+  if (!Array.isArray(commits) || commits.length === 0) {
+    signals.push("recent_commits_unavailable");
+  }
+  if (!packageJson) {
+    signals.push("root_package_json_not_found");
+  }
+
+  return signals;
+}
+
+function firstLine(value, maxLength) {
+  const line = String(value ?? "").split("\n")[0].trim();
+  return line.length > maxLength ? `${line.slice(0, maxLength - 1)}...` : line;
 }
 
 function formatUsdcAtomic(value) {
@@ -1930,6 +2348,12 @@ function agentIdentity() {
         payment: "free",
         endpoint: `${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3`,
       },
+      {
+        name: "GitHub repo intelligence snapshot",
+        transport: "https",
+        payment: "x402",
+        endpoint: `${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js`,
+      },
     ],
     supportedTrust: ["erc-8004", "x402", "base-usdc"],
   };
@@ -2022,6 +2446,14 @@ function x402Manifest() {
         mimeType: "application/json",
         accepts: [x402Accept(MARKET_OHLCV_X402_PRICE)],
       },
+      {
+        url: `${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js`,
+        method: "GET",
+        description:
+          "Paid GitHub repo intelligence snapshot for agent scoping with metadata, languages, recent commits, release, and dependency signals.",
+        mimeType: "application/json",
+        accepts: [x402Accept(DEV_REPO_SNAPSHOT_X402_PRICE)],
+      },
     ],
   };
 }
@@ -2050,6 +2482,7 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/preview?address=${sampleAddress}
 - GET ${baseUrl()}/api/market/crypto-snapshot?limit=50
 - GET ${baseUrl()}/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
+- GET ${baseUrl()}/api/dev/repo-snapshot?repo=vercel/next.js
 - GET ${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3
 - GET ${baseUrl()}/api/the402/services
 - GET ${baseUrl()}/.well-known/the402.json
@@ -2061,6 +2494,7 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/agent-commerce-receipt/${sampleAddress}
 - GET ${baseUrl()}/api/x402/market/crypto-snapshot?limit=50
 - GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
+- GET ${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js
 
 ## the402 provider webhook
 
@@ -2172,6 +2606,44 @@ function marketOhlcvDiscoveryExtension() {
             ],
           },
         ],
+      },
+    },
+  });
+}
+
+function repoSnapshotDiscoveryExtension() {
+  return declareDiscoveryExtension({
+    method: "GET",
+    input: { repo: "vercel/next.js" },
+    inputSchema: {
+      properties: {
+        repo: {
+          type: "string",
+          pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          description: "Public GitHub repository slug.",
+        },
+      },
+      required: ["repo"],
+      additionalProperties: false,
+    },
+    output: {
+      type: "json",
+      example: {
+        service: "Agent Commerce Desk GitHub Repo Intelligence Snapshot",
+        request: { repo: "vercel/next.js" },
+        repository: {
+          fullName: "vercel/next.js",
+          stars: 130000,
+          openIssues: 3000,
+          defaultBranch: "canary",
+        },
+        languages: {
+          primary: "TypeScript",
+          breakdown: [{ language: "TypeScript", percent: 80 }],
+        },
+        agentScoping: {
+          riskSignals: ["high_open_issue_count"],
+        },
       },
     },
   });
@@ -2306,6 +2778,25 @@ async function fetchJson(url, label) {
   });
   if (!response.ok) {
     throw new Error(`${label} request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+async function fetchGitHubJson(path, label) {
+  const headers = {
+    accept: "application/vnd.github+json",
+    "user-agent": "agent-commerce-desk-repo-snapshot/0.1.0",
+    "x-github-api-version": "2022-11-28",
+  };
+  if (GITHUB_PUBLIC_API_TOKEN) {
+    headers.authorization = `Bearer ${GITHUB_PUBLIC_API_TOKEN}`;
+  }
+
+  const response = await fetch(new URL(path, GITHUB_API), { headers });
+  if (!response.ok) {
+    const error = new Error(`${label} request failed: ${response.status}`);
+    error.statusCode = response.status;
+    throw error;
   }
   return response.json();
 }

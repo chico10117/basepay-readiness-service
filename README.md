@@ -14,6 +14,7 @@ $150 Base USDC payment setup
 $200 VPS health dashboard
 $250 Wallet risk monitor
 $300 Agent QA harness
+$75 GitHub repo intelligence snapshot
 ```
 
 Endpoint:
@@ -31,8 +32,11 @@ GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/market/crypto-snapshot?limit=50
 POST /api/market/ohlcv
 POST /api/market/crypto-snapshot
+GET /api/dev/repo-snapshot?repo=owner/name
+POST /api/dev/repo-snapshot
 GET /api/x402/market/crypto-snapshot?limit=50
 GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
+GET /api/x402/dev/repo-snapshot?repo=owner/name
 GET /api/pyrimid/recommend?need=paid%20mcp%20tool
 POST /api/pyrimid/recommend
 GET /.well-known/the402.json
@@ -88,12 +92,19 @@ The POST wrappers accept JSON bodies such as `{"limit": 50}` or
 `{"pairs": ["BTC-USD", "ETH-USD"], "days": 365}` so marketplace probes can call
 the data feeds without query-string construction.
 
+The repo intelligence endpoint returns a public GitHub repository snapshot for
+agent scoping: metadata, language mix, recent commits, latest release, root
+`package.json` signals, and risk flags. It uses the public GitHub API by default;
+set `GITHUB_PUBLIC_API_TOKEN` only if you intentionally want higher public API
+rate limits.
+
 Low-price x402 aliases are available for API directories that require direct
 402 payment challenges. They keep the free proof endpoints unchanged:
 
 ```text
 GET /api/x402/market/crypto-snapshot?limit=50  # $0.01
 GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365  # $0.02
+GET /api/x402/dev/repo-snapshot?repo=vercel/next.js  # $0.05
 ```
 
 The free wallet preview also accepts POST bodies such as
@@ -139,6 +150,7 @@ Without a payment header, the paid endpoint should return HTTP 402:
 curl -i 'http://localhost:4021/api/readiness?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9'
 curl -i 'http://localhost:4021/api/x402/market/crypto-snapshot?limit=10'
 curl -i 'http://localhost:4021/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
+curl -i 'http://localhost:4021/api/x402/dev/repo-snapshot?repo=vercel/next.js'
 ```
 
 Free metadata:
@@ -157,9 +169,13 @@ curl -X POST http://localhost:4021/api/preview \
   -d '{"address":"0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9"}'
 curl 'http://localhost:4021/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
 curl 'http://localhost:4021/api/market/crypto-snapshot?limit=50'
+curl 'http://localhost:4021/api/dev/repo-snapshot?repo=vercel/next.js'
 curl -X POST http://localhost:4021/api/market/crypto-snapshot \
   -H 'content-type: application/json' \
   -d '{"limit": 3}'
+curl -X POST http://localhost:4021/api/dev/repo-snapshot \
+  -H 'content-type: application/json' \
+  -d '{"repo": "vercel/next.js"}'
 curl 'http://localhost:4021/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3'
 curl http://localhost:4021/api/the402/services
 curl http://localhost:4021/.well-known/the402.json
