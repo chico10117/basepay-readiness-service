@@ -31,6 +31,8 @@ GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/market/crypto-snapshot?limit=50
 POST /api/market/ohlcv
 POST /api/market/crypto-snapshot
+GET /api/x402/market/crypto-snapshot?limit=50
+GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/pyrimid/recommend?need=paid%20mcp%20tool
 POST /api/pyrimid/recommend
 GET /.well-known/x402
@@ -82,6 +84,14 @@ The POST wrappers accept JSON bodies such as `{"limit": 50}` or
 `{"pairs": ["BTC-USD", "ETH-USD"], "days": 365}` so marketplace probes can call
 the data feeds without query-string construction.
 
+Low-price x402 aliases are available for API directories that require direct
+402 payment challenges. They keep the free proof endpoints unchanged:
+
+```text
+GET /api/x402/market/crypto-snapshot?limit=50  # $0.01
+GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365  # $0.02
+```
+
 The free wallet preview also accepts POST bodies such as
 `{"address":"0x..."}`. This keeps marketplace webhook calls usable when the
 marketplace invokes a published skill by POST instead of GET.
@@ -108,6 +118,8 @@ Without a payment header, the paid endpoint should return HTTP 402:
 
 ```sh
 curl -i 'http://localhost:4021/api/readiness?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9'
+curl -i 'http://localhost:4021/api/x402/market/crypto-snapshot?limit=10'
+curl -i 'http://localhost:4021/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
 ```
 
 Free metadata:

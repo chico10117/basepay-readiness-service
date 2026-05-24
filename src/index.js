@@ -16,6 +16,10 @@ const SAMPLE_ADDRESS = process.env.SAMPLE_ADDRESS ?? PAY_TO;
 const PORT = Number(process.env.PORT ?? "4021");
 const NETWORK = process.env.X402_NETWORK ?? "eip155:8453";
 const PRICE = process.env.X402_PRICE ?? "$2";
+const MARKET_SNAPSHOT_X402_PRICE =
+  process.env.MARKET_SNAPSHOT_X402_PRICE ?? "$0.01";
+const MARKET_OHLCV_X402_PRICE =
+  process.env.MARKET_OHLCV_X402_PRICE ?? "$0.02";
 const BASE_RPC = process.env.BASE_RPC ?? "https://mainnet.base.org";
 const COINBASE_EXCHANGE_API =
   process.env.COINBASE_EXCHANGE_API ?? "https://api.exchange.coinbase.com";
@@ -108,6 +112,8 @@ const serviceInfo = {
       "GET /api/readiness/:address",
       "GET /api/agent-commerce-receipt?address=0x...",
       "GET /api/agent-commerce-receipt/:address",
+      "GET /api/x402/market/crypto-snapshot?limit=50",
+      "GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
     ],
   },
   input: {
@@ -373,6 +379,50 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         },
       },
       {
+        name: "paid_top_crypto_price_snapshot_feed",
+        endpoint: "/api/x402/market/crypto-snapshot",
+        method: "GET",
+        payment: x402Info(
+          "/api/x402/market/crypto-snapshot?limit=50",
+          MARKET_SNAPSHOT_X402_PRICE,
+        ),
+        endpointUrl: "/api/x402/market/crypto-snapshot?limit=50",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: {
+              type: "integer",
+              minimum: 1,
+              maximum: 50,
+            },
+          },
+        },
+      },
+      {
+        name: "paid_daily_crypto_ohlcv_feed",
+        endpoint: "/api/x402/market/ohlcv",
+        method: "GET",
+        payment: x402Info(
+          "/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
+          MARKET_OHLCV_X402_PRICE,
+        ),
+        endpointUrl: "/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pairs: {
+              type: "string",
+              example: "BTC-USD,ETH-USD",
+            },
+            days: {
+              type: "integer",
+              minimum: 1,
+              maximum: 365,
+            },
+          },
+        },
+      },
+      {
         name: "target_wallet_signature_helper",
         endpoint: "/wallet-sign",
         method: "GET",
@@ -493,6 +543,22 @@ app.get("/.well-known/agent.json", (_req, res) => {
         method: "POST",
       },
       {
+        id: "paid-top-crypto-price-snapshot-feed",
+        name: "Paid x402 Top Crypto Price Snapshot Feed",
+        description:
+          "Low-cost x402 endpoint returning top crypto assets by market cap with price, volume, 24h change, and Coinbase bid/ask spread where available.",
+        uri: "/api/x402/market/crypto-snapshot?limit=50",
+        method: "GET",
+      },
+      {
+        id: "paid-daily-crypto-ohlcv-feed",
+        name: "Paid x402 Daily Crypto OHLCV Feed",
+        description:
+          "Low-cost x402 endpoint returning daily BTC/USD, ETH/USD, or SOL/USD OHLCV candles from Coinbase Exchange public market data.",
+        uri: "/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
+        method: "GET",
+      },
+      {
         id: "pyrimid-product-recommendations",
         name: "Pyrimid Product Recommendations",
         description:
@@ -592,6 +658,34 @@ app.use(
         mimeType: "application/json",
         extensions: receiptDiscoveryExtension({ pathParams: true }),
       },
+      "GET /api/x402/market/crypto-snapshot": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: MARKET_SNAPSHOT_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Paid top crypto market snapshot: prices, market caps, 24h volume/change, and Coinbase bid/ask where available.",
+        mimeType: "application/json",
+        extensions: marketSnapshotDiscoveryExtension(),
+      },
+      "GET /api/x402/market/ohlcv": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: MARKET_OHLCV_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Paid daily OHLCV market feed for BTC-USD, ETH-USD, and SOL-USD from Coinbase Exchange public data.",
+        mimeType: "application/json",
+        extensions: marketOhlcvDiscoveryExtension(),
+      },
     },
     resourceServer,
   ),
@@ -626,6 +720,22 @@ app.get("/api/agent-commerce-receipt/:address", async (req, res, next) => {
   try {
     const report = await buildReadinessReport(req.params.address);
     res.json(buildAgentCommerceReceipt(report));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/x402/market/crypto-snapshot", async (req, res, next) => {
+  try {
+    res.json(await buildCryptoSnapshotFeed(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/x402/market/ohlcv", async (req, res, next) => {
+  try {
+    res.json(await buildMarketOhlcvFeed(req.query));
   } catch (error) {
     next(error);
   }
@@ -1341,11 +1451,11 @@ function paymentInfo() {
   };
 }
 
-function x402Info(path) {
+function x402Info(path, price = PRICE) {
   return {
     endpoint: `${baseUrl()}${path}`,
     method: "GET",
-    priceUsd: priceUsd(),
+    priceUsd: priceUsd(price),
     asset: USDC_CONTRACT,
     network: NETWORK,
     facilitator: ACTIVE_FACILITATOR_URL,
@@ -1387,6 +1497,22 @@ function x402Manifest() {
         mimeType: "application/json",
         accepts: [x402Accept()],
       },
+      {
+        url: `${baseUrl()}/api/x402/market/crypto-snapshot?limit=50`,
+        method: "GET",
+        description:
+          "Paid top crypto market snapshot with market cap rank, price, 24h volume/change, and Coinbase bid/ask where available.",
+        mimeType: "application/json",
+        accepts: [x402Accept(MARKET_SNAPSHOT_X402_PRICE)],
+      },
+      {
+        url: `${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365`,
+        method: "GET",
+        description:
+          "Paid daily OHLCV market feed for BTC-USD, ETH-USD, and SOL-USD from Coinbase Exchange public data.",
+        mimeType: "application/json",
+        accepts: [x402Accept(MARKET_OHLCV_X402_PRICE)],
+      },
     ],
   };
 }
@@ -1421,6 +1547,8 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 
 - GET ${baseUrl()}/api/readiness/${sampleAddress}
 - GET ${baseUrl()}/api/agent-commerce-receipt/${sampleAddress}
+- GET ${baseUrl()}/api/x402/market/crypto-snapshot?limit=50
+- GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 
 Use the x402 manifest for exact payment requirements before calling paid endpoints.
 `;
@@ -1437,6 +1565,95 @@ function receiptDiscoveryExtension(options = {}) {
   return walletAddressDiscoveryExtension({
     ...options,
     output: { example: receiptBazaarOutput().example },
+  });
+}
+
+function marketSnapshotDiscoveryExtension() {
+  return declareDiscoveryExtension({
+    method: "GET",
+    input: { limit: 50 },
+    inputSchema: {
+      properties: {
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 50,
+          description: "Number of ranked assets to return.",
+        },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      type: "json",
+      example: {
+        service: "Agent Commerce Desk Crypto Snapshot Feed",
+        request: { limit: 50, quoteCurrency: "USD" },
+        coverage: {
+          requestedAssets: 50,
+          returnedAssets: 50,
+          coinbaseBidAskAssets: 30,
+        },
+        assets: [
+          {
+            rank: 1,
+            symbol: "BTC",
+            priceUsd: 76719,
+            marketCapUsd: 1536988094000,
+            volume24hUsd: 30752643861,
+            priceChange24hPct: 3.00933,
+          },
+        ],
+      },
+    },
+  });
+}
+
+function marketOhlcvDiscoveryExtension() {
+  return declareDiscoveryExtension({
+    method: "GET",
+    input: { pairs: "BTC-USD,ETH-USD", days: 365 },
+    inputSchema: {
+      properties: {
+        pairs: {
+          type: "string",
+          description:
+            "Comma-separated Coinbase pairs. Supported: BTC-USD, ETH-USD, SOL-USD.",
+        },
+        days: {
+          type: "integer",
+          minimum: 1,
+          maximum: 365,
+        },
+      },
+      additionalProperties: false,
+    },
+    output: {
+      type: "json",
+      example: {
+        service: "Agent Commerce Desk Market Feed",
+        request: {
+          pairs: ["BTC-USD", "ETH-USD"],
+          days: 365,
+          granularity: "1d",
+        },
+        markets: [
+          {
+            pair: "BTC-USD",
+            count: 365,
+            candles: [
+              {
+                date: "2026-05-23",
+                open: 75446.99,
+                high: 77305,
+                low: 74197.11,
+                close: 76650,
+                volume: 5619.0521439,
+              },
+            ],
+          },
+        ],
+      },
+    },
   });
 }
 
@@ -1505,11 +1722,11 @@ function receiptBazaarOutput() {
   };
 }
 
-function x402Accept() {
+function x402Accept(price = PRICE) {
   return {
     scheme: "exact",
     network: NETWORK,
-    amount: String(Math.round(priceUsd() * 1_000_000)),
+    amount: String(Math.round(priceUsd(price) * 1_000_000)),
     asset: USDC_CONTRACT,
     payTo: PAY_TO,
     maxTimeoutSeconds: 300,
@@ -1524,8 +1741,8 @@ function baseUrl() {
   return (PUBLIC_URL?.toString() ?? "http://localhost:4021").replace(/\/$/, "");
 }
 
-function priceUsd() {
-  return Number(PRICE.replace(/^\$/, ""));
+function priceUsd(price = PRICE) {
+  return Number(String(price).replace(/^\$/, ""));
 }
 
 async function rpc(method, params) {
