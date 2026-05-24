@@ -83,6 +83,10 @@ const serviceInfo = {
       "GET /manifest",
       "GET /.well-known/agent-card.json",
       "GET /api/800402/preview",
+      "GET /api/preview?address=0x...",
+      "GET /api/preview/:address",
+      "POST /api/preview",
+      "POST /api/preview/:address",
       "GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
       "GET /api/market/crypto-snapshot?limit=50",
       "POST /api/market/ohlcv",
@@ -260,23 +264,19 @@ app.post("/api/pyrimid/recommend", async (req, res, next) => {
   }
 });
 
-app.get("/api/preview/:address", async (req, res, next) => {
-  try {
-    const report = await buildReadinessReport(req.params.address);
-    res.json(toPreview(report));
-  } catch (error) {
-    next(error);
-  }
-});
+app.get("/api/preview/:address", previewReadiness);
+app.post("/api/preview/:address", previewReadiness);
+app.get("/api/preview", previewReadiness);
+app.post("/api/preview", previewReadiness);
 
-app.get("/api/preview", async (req, res, next) => {
+async function previewReadiness(req, res, next) {
   try {
-    const report = await buildReadinessReport(String(req.query.address ?? ""));
+    const report = await buildReadinessReport(previewAddress(req));
     res.json(toPreview(report));
   } catch (error) {
     next(error);
   }
-});
+}
 
 app.get("/.well-known/agent-card.json", (_req, res) => {
   res.json({
@@ -1234,6 +1234,27 @@ function normalizeAddress(address) {
     throw error;
   }
   return address;
+}
+
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function previewAddress(req) {
+  const body = objectValue(req.body);
+  const input = objectValue(body.input);
+  const payload = objectValue(body.payload);
+  const args = objectValue(body.arguments);
+
+  return String(
+    req.params.address ??
+      req.query.address ??
+      body.address ??
+      input.address ??
+      payload.address ??
+      args.address ??
+      ""
+  );
 }
 
 async function buildReadinessReport(rawAddress) {

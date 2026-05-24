@@ -21,6 +21,10 @@ Endpoint:
 ```text
 GET /api/readiness?address=0x...
 GET /api/readiness/:address
+GET /api/preview?address=0x...
+GET /api/preview/:address
+POST /api/preview
+POST /api/preview/:address
 GET /api/agent-commerce-receipt?address=0x...
 GET /api/agent-commerce-receipt/:address
 GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
@@ -75,6 +79,10 @@ The POST wrappers accept JSON bodies such as `{"limit": 50}` or
 `{"pairs": ["BTC-USD", "ETH-USD"], "days": 365}` so marketplace probes can call
 the data feeds without query-string construction.
 
+The free wallet preview also accepts POST bodies such as
+`{"address":"0x..."}`. This keeps marketplace webhook calls usable when the
+marketplace invokes a published skill by POST instead of GET.
+
 The Pyrimid recommender uses the official `@pyrimid/sdk` resolver to recommend
 paid MCP/API products by natural-language need. It returns the product endpoint,
 x402 purchase header, affiliate split estimate, and the target Base USDC payout
@@ -106,6 +114,10 @@ curl http://localhost:4021/manifest
 curl http://localhost:4021/.well-known/agent-card.json
 curl http://localhost:4021/.well-known/agent.json
 curl http://localhost:4021/api/800402/preview
+curl 'http://localhost:4021/api/preview?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9'
+curl -X POST http://localhost:4021/api/preview \
+  -H 'content-type: application/json' \
+  -d '{"address":"0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9"}'
 curl 'http://localhost:4021/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
 curl 'http://localhost:4021/api/market/crypto-snapshot?limit=50'
 curl -X POST http://localhost:4021/api/market/crypto-snapshot \
