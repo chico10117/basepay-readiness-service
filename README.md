@@ -41,6 +41,7 @@ GET /api/x402/market/crypto-snapshot?limit=50
 GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/x402/dev/repo-snapshot?repo=owner/name
 GET /api/x402/weather/current?latitude=37.7749&longitude=-122.4194
+GET /api/x402/services/integration-triage?repository_or_url=...&goal=...
 GET /api/pyrimid/recommend?need=paid%20mcp%20tool
 POST /api/pyrimid/recommend
 GET /.well-known/the402.json
@@ -115,7 +116,13 @@ GET /api/x402/market/crypto-snapshot?limit=50  # $0.01
 GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365  # $0.02
 GET /api/x402/dev/repo-snapshot?repo=vercel/next.js  # $0.05
 GET /api/x402/weather/current?latitude=37.7749&longitude=-122.4194  # $0.01
+GET /api/x402/services/integration-triage?repository_or_url=...&goal=...  # $100
 ```
+
+The integration triage endpoint is a fixed-price x402 human-service intake for
+Base USDC/x402 endpoint, marketplace listing, webhook, or receipt-verifier
+work. It validates `repository_or_url` and `goal` before payment, then returns
+a paid order receipt and 24h delivery instructions after a valid x402 payment.
 
 The free wallet preview also accepts POST bodies such as
 `{"address":"0x..."}`. POST helpers unwrap AgentMint-style bodies such as
@@ -162,6 +169,7 @@ curl -i 'http://localhost:4021/api/readiness?address=0x820a7bf90d944bb26bfD9b62A
 curl -i 'http://localhost:4021/api/x402/market/crypto-snapshot?limit=10'
 curl -i 'http://localhost:4021/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
 curl -i 'http://localhost:4021/api/x402/dev/repo-snapshot?repo=vercel/next.js'
+curl -i 'http://localhost:4021/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20x402%20payment%20challenges%20browser-readable'
 ```
 
 Free metadata:

@@ -1,6 +1,6 @@
 {
   "name": "base-wallet-readiness-service",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "description": "x402-ready Base wallet payment-readiness checker that accepts USDC to a configured receiving wallet.",

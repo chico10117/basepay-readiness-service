@@ -1,5 +1,5 @@
 import express from "express";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { facilitator as coinbaseFacilitator } from "@coinbase/x402";
@@ -24,6 +24,8 @@ const DEV_REPO_SNAPSHOT_X402_PRICE =
   process.env.DEV_REPO_SNAPSHOT_X402_PRICE ?? "$0.05";
 const WEATHER_CURRENT_X402_PRICE =
   process.env.WEATHER_CURRENT_X402_PRICE ?? "$0.01";
+const INTEGRATION_TRIAGE_X402_PRICE =
+  process.env.INTEGRATION_TRIAGE_X402_PRICE ?? "$100";
 const BASE_RPC = process.env.BASE_RPC ?? "https://mainnet.base.org";
 const COINBASE_EXCHANGE_API =
   process.env.COINBASE_EXCHANGE_API ?? "https://api.exchange.coinbase.com";
@@ -75,6 +77,7 @@ const PAID_ROUTE_PREFIXES = [
   "/api/x402/market/ohlcv",
   "/api/x402/dev/repo-snapshot",
   "/api/x402/weather/current",
+  "/api/x402/services/integration-triage",
 ];
 const PAYMENT_REQUEST_HEADERS = [
   "Authorization",
@@ -144,7 +147,7 @@ app.use(
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.10.0",
+  version: "0.11.0",
   description:
     "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -202,6 +205,7 @@ const serviceInfo = {
       "GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
       "GET /api/x402/dev/repo-snapshot?repo=owner/name",
       "GET /api/x402/weather/current?latitude=37.7749&longitude=-122.4194",
+      "GET /api/x402/services/integration-triage?repository_or_url=...&goal=...",
     ],
   },
   input: {
@@ -689,6 +693,18 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
         inputSchema: weatherInputSchema(),
       },
       {
+        name: "paid_base_usdc_x402_integration_triage",
+        endpoint: "/api/x402/services/integration-triage",
+        method: "GET",
+        payment: x402Info(
+          "/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable",
+          INTEGRATION_TRIAGE_X402_PRICE,
+        ),
+        endpointUrl:
+          "/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable",
+        inputSchema: integrationTriageInputSchema(),
+      },
+      {
         name: "target_wallet_signature_helper",
         endpoint: "/wallet-sign",
         method: "GET",
@@ -893,6 +909,14 @@ app.get("/.well-known/agent.json", (_req, res) => {
         method: "GET",
       },
       {
+        id: "paid-base-usdc-x402-integration-triage",
+        name: "Paid Base USDC x402 Integration Triage",
+        description:
+          "Fixed-price x402 human-service intake for Base USDC/x402 endpoint, marketplace listing, webhook, or receipt-verifier triage.",
+        uri: "/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable",
+        method: "GET",
+      },
+      {
         id: "pyrimid-product-recommendations",
         name: "Pyrimid Product Recommendations",
         description:
@@ -984,6 +1008,21 @@ app.use((req, res, next) => {
   }
 
   next();
+});
+
+app.use("/api/x402/services/integration-triage", (req, res, next) => {
+  if (req.method === "OPTIONS") {
+    next();
+    return;
+  }
+
+  try {
+    parseIntegrationTriageRequest(req.query);
+    next();
+  } catch (error) {
+    attachPaidRouteBrowserHeaders(req, res);
+    res.status(error.statusCode ?? 400).json({ error: error.message });
+  }
 });
 
 app.use(
@@ -1101,6 +1140,20 @@ app.use(
         mimeType: "application/json",
         extensions: weatherCurrentDiscoveryExtension(),
       },
+      "GET /api/x402/services/integration-triage": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: INTEGRATION_TRIAGE_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Paid same-day Base USDC/x402 integration triage intake. Returns a 24h order receipt, proof requirements, and delivery instructions.",
+        mimeType: "application/json",
+        extensions: integrationTriageDiscoveryExtension(),
+      },
     },
     resourceServer,
   ),
@@ -1167,6 +1220,14 @@ app.get("/api/x402/dev/repo-snapshot", async (req, res, next) => {
 app.get("/api/x402/weather/current", async (req, res, next) => {
   try {
     res.json(await buildWeatherCurrent(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/x402/services/integration-triage", async (req, res, next) => {
+  try {
+    res.json(buildIntegrationTriageOrder(req.query));
   } catch (error) {
     next(error);
   }
@@ -2026,24 +2087,8 @@ function the402ServiceDefinitions() {
       category: "development",
       tags: ["x402", "base", "usdc", "integration", "debugging"],
       webhook_url: webhookUrl,
-      input_schema: {
-        type: "object",
-        required: ["repository_or_url", "goal"],
-        properties: {
-          repository_or_url: {
-            type: "string",
-            description: "GitHub repo, deployment URL, API docs, or failing endpoint.",
-          },
-          goal: {
-            type: "string",
-            description: "What should work when the triage is complete.",
-          },
-          constraints: {
-            type: "string",
-            description: "Deployment, wallet, security, or deadline constraints.",
-          },
-        },
-      },
+      purchase_url: `${baseUrl()}/api/x402/services/integration-triage`,
+      input_schema: integrationTriageInputSchema(),
       deliverable_schema: {
         type: "object",
         properties: {
@@ -2054,6 +2099,96 @@ function the402ServiceDefinitions() {
       },
     },
   ];
+}
+
+function parseIntegrationTriageRequest(query) {
+  return {
+    repository_or_url: requiredQueryString(
+      query.repository_or_url,
+      "repository_or_url",
+      500,
+    ),
+    goal: requiredQueryString(query.goal, "goal", 800),
+    contact: optionalQueryString(query.contact, 300),
+    constraints: optionalQueryString(query.constraints, 1000),
+  };
+}
+
+function buildIntegrationTriageOrder(query) {
+  const request = parseIntegrationTriageRequest(query);
+  const acceptedAt = new Date().toISOString();
+  const orderId = createHash("sha256")
+    .update(`${acceptedAt}\n${JSON.stringify(request)}`)
+    .digest("hex")
+    .slice(0, 16);
+
+  return {
+    service: "Base USDC x402 Integration Triage",
+    orderId: `triage-${orderId}`,
+    status: "paid_intake_received",
+    acceptedAt,
+    payment: {
+      asset: "native USDC",
+      assetContract: USDC_CONTRACT,
+      network: "Base",
+      networkCaip2: NETWORK,
+      expectedAmountAtomic: x402Accept(INTEGRATION_TRIAGE_X402_PRICE).amount,
+      expectedAmountUsd: priceUsd(INTEGRATION_TRIAGE_X402_PRICE),
+      payTo: PAY_TO,
+      facilitator: ACTIVE_FACILITATOR_URL,
+    },
+    request,
+    deliverable: {
+      sla: "24h from paid intake",
+      format: "findings, proof URLs, and a concrete patch or implementation plan",
+      includes: [
+        "x402/Base USDC payment challenge review",
+        "wallet/payTo and facilitator verification",
+        "CORS, cache, preflight, and browser-agent compatibility checks",
+        "marketplace listing or webhook triage",
+        "minimal patch plan with exact reproduction commands",
+      ],
+      excludes: [
+        "custody of private keys or seed phrases",
+        "production writes, payments, or deployments without explicit owner approval",
+      ],
+    },
+    nextSteps: [
+      "Keep this JSON receipt and the x402 payment transaction hash.",
+      "If the repository or URL is private, grant access out-of-band and reference the orderId.",
+      "For public work, open a GitHub issue with the orderId and non-secret context.",
+    ],
+    provider: {
+      name: serviceInfo.name,
+      wallet: PAY_TO,
+      publicServiceUrl: baseUrl(),
+      paidEndpoint: `${baseUrl()}/api/x402/services/integration-triage`,
+      issueTemplate:
+        "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
+    },
+  };
+}
+
+function requiredQueryString(value, field, maxLength) {
+  const parsed = optionalQueryString(value, maxLength);
+  if (!parsed) {
+    const error = new Error(`${field} is required before payment`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return parsed;
+}
+
+function optionalQueryString(value, maxLength) {
+  const parsed = Array.isArray(value) ? value[0] : value;
+  const text = String(parsed ?? "").trim();
+  if (!text) return "";
+  if (text.length > maxLength) {
+    const error = new Error(`value must be ${maxLength} characters or fewer`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return text;
 }
 
 function parseSnapshotLimit(rawLimit) {
@@ -2887,6 +3022,14 @@ function x402Manifest() {
         mimeType: "application/json",
         accepts: [x402Accept(WEATHER_CURRENT_X402_PRICE)],
       },
+      {
+        url: `${baseUrl()}/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable`,
+        method: "GET",
+        description:
+          "Paid same-day Base USDC/x402 integration triage. Returns a 24h order receipt, proof requirements, and delivery instructions.",
+        mimeType: "application/json",
+        accepts: [x402Accept(INTEGRATION_TRIAGE_X402_PRICE)],
+      },
     ],
   };
 }
@@ -3033,6 +3176,17 @@ function openApiDocument() {
           outputExample: bazaarOutputExample(weatherCurrentDiscoveryExtension()),
         }),
       },
+      "/api/x402/services/integration-triage": {
+        get: paidOpenApiOperation({
+          operationId: "getPaidIntegrationTriage",
+          summary: "Paid Base USDC/x402 integration triage",
+          description:
+            "Accepts a paid triage intake for a Base USDC/x402 endpoint, marketplace listing, webhook, or receipt verifier and returns an order receipt with 24h delivery instructions.",
+          price: INTEGRATION_TRIAGE_X402_PRICE,
+          parameters: integrationTriageOpenApiParameters(),
+          outputExample: bazaarOutputExample(integrationTriageDiscoveryExtension()),
+        }),
+      },
     },
   };
 }
@@ -3099,6 +3253,39 @@ function addressQueryParameter() {
   };
 }
 
+function integrationTriageOpenApiParameters() {
+  return [
+    {
+      name: "repository_or_url",
+      in: "query",
+      required: true,
+      schema: { type: "string", maxLength: 500 },
+      description: "GitHub repo, deployment URL, API docs, or failing endpoint.",
+    },
+    {
+      name: "goal",
+      in: "query",
+      required: true,
+      schema: { type: "string", maxLength: 800 },
+      description: "What should work when the triage is complete.",
+    },
+    {
+      name: "contact",
+      in: "query",
+      required: false,
+      schema: { type: "string", maxLength: 300 },
+      description: "Public GitHub handle, email alias, or other buyer contact.",
+    },
+    {
+      name: "constraints",
+      in: "query",
+      required: false,
+      schema: { type: "string", maxLength: 1000 },
+      description: "Deployment, wallet, security, or deadline constraints.",
+    },
+  ];
+}
+
 function bazaarOutputExample(extension) {
   return extension?.bazaar?.info?.output?.example ?? {};
 }
@@ -3144,6 +3331,7 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 - GET ${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js
 - GET ${baseUrl()}/api/x402/weather/current?latitude=37.7749&longitude=-122.4194
+- GET ${baseUrl()}/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable
 
 ## the402 provider webhook
 
@@ -3339,6 +3527,37 @@ function weatherCurrentDiscoveryExtension() {
   });
 }
 
+function integrationTriageDiscoveryExtension() {
+  return declareDiscoveryExtension({
+    method: "GET",
+    input: {
+      repository_or_url: "https://github.com/example/project",
+      goal: "Make the x402 Base USDC endpoint browser-agent readable and ready for marketplace listing.",
+      contact: "github:@buyer",
+      constraints: "No production writes without approval.",
+    },
+    inputSchema: integrationTriageInputSchema(),
+    output: {
+      type: "json",
+      example: {
+        service: "Base USDC x402 Integration Triage",
+        orderId: "triage-example",
+        status: "paid_intake_received",
+        payment: {
+          asset: "native USDC",
+          network: "Base",
+          expectedAmountUsd: 100,
+          payTo: PAY_TO,
+        },
+        deliverable: {
+          sla: "24h from paid intake",
+          format: "findings, proof URLs, and a concrete patch or implementation plan",
+        },
+      },
+    },
+  });
+}
+
 function weatherInputSchema() {
   return {
     type: "object",
@@ -3369,6 +3588,36 @@ function weatherInputSchema() {
       wind_speed_unit: {
         type: "string",
         enum: ["kmh", "ms", "mph", "kn"],
+      },
+    },
+    additionalProperties: false,
+  };
+}
+
+function integrationTriageInputSchema() {
+  return {
+    type: "object",
+    required: ["repository_or_url", "goal"],
+    properties: {
+      repository_or_url: {
+        type: "string",
+        maxLength: 500,
+        description: "GitHub repo, deployment URL, API docs, or failing endpoint.",
+      },
+      goal: {
+        type: "string",
+        maxLength: 800,
+        description: "What should work when the triage is complete.",
+      },
+      contact: {
+        type: "string",
+        maxLength: 300,
+        description: "Public GitHub handle, email alias, or other buyer contact.",
+      },
+      constraints: {
+        type: "string",
+        maxLength: 1000,
+        description: "Deployment, wallet, security, or deadline constraints.",
       },
     },
     additionalProperties: false,
