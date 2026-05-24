@@ -40,6 +40,7 @@ GET /api/x402/dev/repo-snapshot?repo=owner/name
 GET /api/pyrimid/recommend?need=paid%20mcp%20tool
 POST /api/pyrimid/recommend
 GET /.well-known/the402.json
+GET /.well-known/402index-verify.txt
 GET /api/the402/services
 GET /api/the402/webhook
 POST /api/the402/webhook
@@ -179,6 +180,7 @@ curl -X POST http://localhost:4021/api/dev/repo-snapshot \
 curl 'http://localhost:4021/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3'
 curl http://localhost:4021/api/the402/services
 curl http://localhost:4021/.well-known/the402.json
+curl http://localhost:4021/.well-known/402index-verify.txt
 curl -X POST http://localhost:4021/api/the402/webhook \
   -H 'content-type: application/json' \
   -d '{"event":"webhook_test"}'

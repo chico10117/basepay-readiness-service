@@ -51,6 +51,9 @@ const PYRIMID_CATALOG_URL =
 const PYRIMID_DEFAULT_MAX_PRICE_ATOMIC = Number(
   process.env.PYRIMID_DEFAULT_MAX_PRICE_ATOMIC ?? "1000000",
 );
+const FOUR_O_TWO_INDEX_VERIFICATION_HASH =
+  process.env.FOUR_O_TWO_INDEX_VERIFICATION_HASH ??
+  "1505afd8aa35f67c6e036f5b95a276890559851fc9742b2a242d2b3197a109e8";
 const FACILITATOR_URL =
   process.env.X402_FACILITATOR_URL ?? "https://facilitator.world.fun";
 const USE_CDP_FACILITATOR = process.env.X402_USE_CDP_FACILITATOR === "true";
@@ -784,6 +787,10 @@ app.get("/.well-known/x402", (_req, res) => {
 
 app.get("/.well-known/x402.json", (_req, res) => {
   res.json(x402Manifest());
+});
+
+app.get("/.well-known/402index-verify.txt", (_req, res) => {
+  res.type("text/plain").send(`${FOUR_O_TWO_INDEX_VERIFICATION_HASH}\n`);
 });
 
 app.get("/llms.txt", (_req, res) => {
