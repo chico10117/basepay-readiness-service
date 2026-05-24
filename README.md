@@ -48,6 +48,9 @@ GET /.well-known/402index-verify.txt
 GET /api/the402/services
 GET /api/the402/webhook
 POST /api/the402/webhook
+GET /open-frame
+POST /open-frame
+GET /open-frame.svg
 GET /.well-known/x402
 GET /.well-known/x402.json
 GET /llms.txt
@@ -191,10 +194,16 @@ curl 'http://localhost:4021/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3
 curl http://localhost:4021/api/the402/services
 curl http://localhost:4021/.well-known/the402.json
 curl http://localhost:4021/.well-known/402index-verify.txt
+curl http://localhost:4021/open-frame
 curl -X POST http://localhost:4021/api/the402/webhook \
   -H 'content-type: application/json' \
   -d '{"event":"webhook_test"}'
 ```
+
+The `/open-frame` endpoint is compatible with the Open Frames metadata
+standard. It advertises `of:accepts:xmtp`, `of:accepts:farcaster`, and
+`of:accepts:anonymous`, includes Farcaster fallback tags, and links back to the
+wallet preview, paid work request, and wallet signer.
 
 The `agent-commerce-receipt` endpoint is the 800402 demo surface. It combines
 ERC-8004-style agent metadata, x402 Base USDC payment terms, and the Base

@@ -99,7 +99,7 @@ app.use(
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.9.0",
+  version: "0.10.0",
   description:
     "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -142,6 +142,9 @@ const serviceInfo = {
       "GET /api/the402/services",
       "GET /api/the402/webhook",
       "POST /api/the402/webhook",
+      "GET /open-frame",
+      "POST /open-frame",
+      "GET /open-frame.svg",
       "GET /wallet-sign",
     ],
     paid: [
@@ -235,6 +238,7 @@ const serviceInfo = {
     pyrimidRecommendations: "/api/pyrimid/recommend",
     the402Services: "/api/the402/services",
     the402Webhook: "/api/the402/webhook",
+    openFrame: "/open-frame",
   },
   pyrimid: {
     integrationPath: "embedded_resolver",
@@ -898,6 +902,14 @@ app.get("/llms.txt", (_req, res) => {
 
 app.get("/wallet-sign", (_req, res) => {
   res.sendFile(join(PUBLIC_DIR, "wallet-sign.html"));
+});
+
+app.get("/open-frame", (_req, res) => {
+  res.type("html").send(openFrameHtml());
+});
+
+app.post("/open-frame", (_req, res) => {
+  res.type("html").send(openFrameHtml({ refreshed: true }));
 });
 
 app.get("/favicon.ico", (_req, res) => {
@@ -2996,6 +3008,7 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/the402/services
 - GET ${baseUrl()}/.well-known/the402.json
 - GET ${baseUrl()}/api/the402/webhook
+- GET ${baseUrl()}/open-frame
 
 ## Paid x402 endpoints
 
@@ -3318,6 +3331,86 @@ function x402Accept(price = PRICE) {
 
 function baseUrl() {
   return (PUBLIC_URL?.toString() ?? "http://localhost:4021").replace(/\/$/, "");
+}
+
+function openFrameHtml(options = {}) {
+  const root = baseUrl();
+  const frameUrl = `${root}/open-frame`;
+  const imageUrl = `${root}/open-frame.svg`;
+  const previewUrl =
+    `${root}/api/preview?address=${encodeURIComponent(SAMPLE_ADDRESS)}`;
+  const orderUrl =
+    "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml";
+  const signerUrl = `${root}/wallet-sign`;
+  const refreshedCopy = options.refreshed
+    ? "Frame refreshed. The target wallet remains the published Base USDC payout address."
+    : "Open-Frames compatible proof for Base USDC wallet readiness and x402 service discovery.";
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Commerce Desk Open Frame</title>
+    <meta property="og:title" content="Agent Commerce Desk" />
+    <meta property="og:description" content="${escapeHtml(refreshedCopy)}" />
+    <meta property="og:image" content="${imageUrl}" />
+    <meta property="of:version" content="vNext" />
+    <meta property="of:accepts:xmtp" content="vNext" />
+    <meta property="of:accepts:farcaster" content="vNext" />
+    <meta property="of:accepts:anonymous" content="1.0" />
+    <meta property="of:image" content="${imageUrl}" />
+    <meta property="of:image:aspect_ratio" content="1.91:1" />
+    <meta property="of:image:alt" content="Agent Commerce Desk frame for Base USDC wallet readiness and x402 APIs." />
+    <meta property="of:post_url" content="${frameUrl}" />
+    <meta property="of:button:1" content="Refresh proof" />
+    <meta property="of:button:1:action" content="post" />
+    <meta property="of:button:2" content="Free preview" />
+    <meta property="of:button:2:action" content="link" />
+    <meta property="of:button:2:target" content="${previewUrl}" />
+    <meta property="of:button:3" content="Order work" />
+    <meta property="of:button:3:action" content="link" />
+    <meta property="of:button:3:target" content="${orderUrl}" />
+    <meta property="of:button:4" content="Wallet signer" />
+    <meta property="of:button:4:action" content="link" />
+    <meta property="of:button:4:target" content="${signerUrl}" />
+    <meta property="fc:frame" content="vNext" />
+    <meta property="fc:frame:image" content="${imageUrl}" />
+    <meta property="fc:frame:image:aspect_ratio" content="1.91:1" />
+    <meta property="fc:frame:post_url" content="${frameUrl}" />
+    <meta property="fc:frame:button:1" content="Refresh proof" />
+    <meta property="fc:frame:button:1:action" content="post" />
+    <meta property="fc:frame:button:2" content="Free preview" />
+    <meta property="fc:frame:button:2:action" content="link" />
+    <meta property="fc:frame:button:2:target" content="${previewUrl}" />
+    <meta property="fc:frame:button:3" content="Order work" />
+    <meta property="fc:frame:button:3:action" content="link" />
+    <meta property="fc:frame:button:3:target" content="${orderUrl}" />
+    <meta property="fc:frame:button:4" content="Wallet signer" />
+    <meta property="fc:frame:button:4:action" content="link" />
+    <meta property="fc:frame:button:4:target" content="${signerUrl}" />
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; color: #111827; }
+      code { overflow-wrap: anywhere; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Agent Commerce Desk Open Frame</h1>
+      <p>${escapeHtml(refreshedCopy)}</p>
+      <p>Receiving wallet: <code>${PAY_TO}</code></p>
+      <p><a href="${previewUrl}">Open the wallet readiness preview</a></p>
+    </main>
+  </body>
+</html>`;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 function priceUsd(price = PRICE) {
