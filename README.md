@@ -35,6 +35,10 @@ GET /api/x402/market/crypto-snapshot?limit=50
 GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/pyrimid/recommend?need=paid%20mcp%20tool
 POST /api/pyrimid/recommend
+GET /.well-known/the402.json
+GET /api/the402/services
+GET /api/the402/webhook
+POST /api/the402/webhook
 GET /.well-known/x402
 GET /.well-known/x402.json
 GET /llms.txt
@@ -101,6 +105,21 @@ paid MCP/API products by natural-language need. It returns the product endpoint,
 x402 purchase header, affiliate split estimate, and the target Base USDC payout
 wallet, but it does not sign or spend from any wallet.
 
+The the402 provider endpoints expose dashboard/API-ready service definitions
+and a webhook receiver:
+
+```text
+GET /.well-known/the402.json
+GET /api/the402/services
+GET /api/the402/webhook
+POST /api/the402/webhook
+```
+
+After onboarding on the402, set `THE402_WEBHOOK_SECRET` and `THE402_API_KEY`.
+The webhook verifies `X-Webhook-Signature` when configured, auto-fulfills the
+instant market-data and wallet-readiness services, and accepts manual
+implementation triage jobs without storing the target wallet private key.
+
 The wallet signer at `/wallet-sign` is a client-side helper for producing
 `personal_sign` or `eth_signTypedData_v4` payloads from the published Base
 receiving wallet. It does not post messages or signatures back to the server.
@@ -142,6 +161,11 @@ curl -X POST http://localhost:4021/api/market/crypto-snapshot \
   -H 'content-type: application/json' \
   -d '{"limit": 3}'
 curl 'http://localhost:4021/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3'
+curl http://localhost:4021/api/the402/services
+curl http://localhost:4021/.well-known/the402.json
+curl -X POST http://localhost:4021/api/the402/webhook \
+  -H 'content-type: application/json' \
+  -d '{"event":"webhook_test"}'
 ```
 
 The `agent-commerce-receipt` endpoint is the 800402 demo surface. It combines

@@ -1,5 +1,5 @@
 import express from "express";
-import { timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { facilitator as coinbaseFacilitator } from "@coinbase/x402";
@@ -31,6 +31,11 @@ const MARKET_FEED_API_KEY = process.env.MARKET_FEED_API_KEY ?? "";
 const MARKET_CACHE_TTL_SECONDS = Number(process.env.MARKET_CACHE_TTL_SECONDS ?? "900");
 const MARKET_SNAPSHOT_CACHE_TTL_SECONDS = Number(
   process.env.MARKET_SNAPSHOT_CACHE_TTL_SECONDS ?? "60",
+);
+const THE402_API_KEY = process.env.THE402_API_KEY ?? "";
+const THE402_WEBHOOK_SECRET = process.env.THE402_WEBHOOK_SECRET ?? "";
+const THE402_WEBHOOK_TOLERANCE_SECONDS = Number(
+  process.env.THE402_WEBHOOK_TOLERANCE_SECONDS ?? "300",
 );
 const PYRIMID_AFFILIATE_ID =
   process.env.PYRIMID_AFFILIATE_ID ?? "agent-commerce-desk";
@@ -69,11 +74,18 @@ if (PUBLIC_URL) {
     next();
   });
 }
-app.use(express.json({ limit: "64kb" }));
+app.use(
+  express.json({
+    limit: "64kb",
+    verify: (req, _res, buf) => {
+      req.rawBody = Buffer.from(buf);
+    },
+  }),
+);
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.7.1",
+  version: "0.8.0",
   description:
     "Checks whether a Base wallet is safe to publish as a USDC receiving wallet, then sells fixed-price agent payment, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -105,6 +117,10 @@ const serviceInfo = {
       "POST /api/market/crypto-snapshot",
       "GET /api/pyrimid/recommend?need=paid%20mcp%20tool",
       "POST /api/pyrimid/recommend",
+      "GET /.well-known/the402.json",
+      "GET /api/the402/services",
+      "GET /api/the402/webhook",
+      "POST /api/the402/webhook",
       "GET /wallet-sign",
     ],
     paid: [
@@ -183,6 +199,8 @@ const serviceInfo = {
   tools: {
     walletSignatureHelper: "/wallet-sign",
     pyrimidRecommendations: "/api/pyrimid/recommend",
+    the402Services: "/api/the402/services",
+    the402Webhook: "/api/the402/webhook",
   },
   pyrimid: {
     integrationPath: "embedded_resolver",
@@ -273,6 +291,37 @@ app.get("/api/pyrimid/recommend", async (req, res, next) => {
 app.post("/api/pyrimid/recommend", async (req, res, next) => {
   try {
     res.json(await buildPyrimidRecommendations(bodyToQuery(req.body)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/.well-known/the402.json", (_req, res) => {
+  res.json(the402Manifest());
+});
+
+app.get("/api/the402/services", (_req, res) => {
+  res.json(the402Manifest());
+});
+
+app.get("/api/the402/webhook", (_req, res) => {
+  res.json({
+    ok: true,
+    service: serviceInfo.name,
+    endpoint: `${baseUrl()}/api/the402/webhook`,
+    expectedSignature: THE402_WEBHOOK_SECRET
+      ? "X-Webhook-Signature HMAC-SHA256"
+      : "not configured yet",
+    events: ["job_dispatch", "thread_inquiry", "quote_request", "webhook_test"],
+    instantServices: the402ServiceDefinitions()
+      .filter((service) => service.fulfillment_type === "instant")
+      .map((service) => service.name),
+  });
+});
+
+app.post("/api/the402/webhook", async (req, res, next) => {
+  try {
+    res.json(await handleThe402Webhook(req));
   } catch (error) {
     next(error);
   }
@@ -475,6 +524,42 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
           },
         },
       },
+      {
+        name: "the402_provider_services",
+        endpoint: "/api/the402/services",
+        method: "GET",
+        payment: {
+          mode: "free",
+          settlement:
+            "service definitions only; purchased jobs settle through the402 escrow in USDC on Base",
+          payoutWallet: PAY_TO,
+        },
+        endpointUrl: "/api/the402/services",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+      },
+      {
+        name: "the402_provider_webhook",
+        endpoint: "/api/the402/webhook",
+        method: "POST",
+        payment: {
+          mode: "marketplace_webhook",
+          settlement: "the402 escrow, USDC on Base",
+          payoutWallet: PAY_TO,
+        },
+        endpointUrl: "/api/the402/webhook",
+        inputSchema: {
+          type: "object",
+          properties: {
+            event: { type: "string" },
+            job_id: { type: "string" },
+            brief: { type: "object" },
+          },
+        },
+      },
     ],
   });
 });
@@ -565,6 +650,22 @@ app.get("/.well-known/agent.json", (_req, res) => {
           "Official @pyrimid/sdk resolver integration that recommends paid MCP/API products by natural-language need and returns x402 purchase metadata plus affiliate split estimates.",
         uri: "/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3",
         method: "GET",
+      },
+      {
+        id: "the402-provider-services",
+        name: "the402 Provider Service Definitions",
+        description:
+          "Dashboard/API-ready service definitions and webhook URL for listing Agent Commerce Desk on the402 marketplace without wallet custody.",
+        uri: "/api/the402/services",
+        method: "GET",
+      },
+      {
+        id: "the402-provider-webhook",
+        name: "the402 Provider Webhook",
+        description:
+          "HMAC-verifiable webhook receiver for the402 jobs. It auto-fulfills instant data API purchases and accepts manual implementation triage jobs.",
+        uri: "/api/the402/webhook",
+        method: "POST",
       },
       {
         id: "target-wallet-signature-helper",
@@ -902,6 +1003,414 @@ async function buildPyrimidRecommendations(query) {
     },
     latencyMs: Date.now() - startedAt,
   };
+}
+
+async function handleThe402Webhook(req) {
+  const payload = objectValue(req.body);
+  const eventType = String(payload.event ?? payload.type ?? "webhook_test");
+  const normalizedEvent = eventType.toLowerCase();
+
+  if (THE402_WEBHOOK_SECRET) {
+    verifyThe402Signature(req);
+  } else if (normalizedEvent === "job_dispatch") {
+    const error = new Error("THE402_WEBHOOK_SECRET is not configured");
+    error.statusCode = 503;
+    throw error;
+  }
+
+  if (["ping", "test", "webhook_test", "health_check"].includes(normalizedEvent)) {
+    return {
+      received: true,
+      event: eventType,
+      webhook: `${baseUrl()}/api/the402/webhook`,
+      secretConfigured: Boolean(THE402_WEBHOOK_SECRET),
+      services: the402ServiceDefinitions().map((service) => service.name),
+    };
+  }
+
+  if (normalizedEvent === "job_dispatch") {
+    return handleThe402JobDispatch(payload);
+  }
+
+  if (["thread_inquiry", "quote_request"].includes(normalizedEvent)) {
+    return handleThe402Inquiry(payload, normalizedEvent);
+  }
+
+  return {
+    received: true,
+    event: eventType,
+    status: "ignored_unknown_event",
+  };
+}
+
+async function handleThe402JobDispatch(payload) {
+  const serviceKey = inferThe402ServiceKey(payload);
+  const brief = the402Brief(payload);
+  const deliverables = await buildThe402Deliverables(serviceKey, brief);
+  const callback =
+    deliverables.autoComplete === true
+      ? await maybePostThe402JobUpdate(payload, deliverables)
+      : { posted: false, reason: "manual_or_quote_service" };
+
+  return {
+    received: true,
+    event: "job_dispatch",
+    jobId: payload.job_id ?? payload.id ?? null,
+    serviceKey,
+    status: deliverables.autoComplete ? "completed" : "accepted",
+    deliverables,
+    callback,
+  };
+}
+
+function handleThe402Inquiry(payload, normalizedEvent) {
+  const serviceKey = inferThe402ServiceKey(payload);
+  const quote = buildThe402Quote(serviceKey, payload);
+
+  return {
+    received: true,
+    event: normalizedEvent,
+    threadId: payload.thread_id ?? payload.id ?? null,
+    serviceKey,
+    status: "ready_to_respond",
+    quote,
+  };
+}
+
+async function buildThe402Deliverables(serviceKey, brief) {
+  if (serviceKey === "crypto_snapshot") {
+    const report = await buildCryptoSnapshotFeed({
+      limit: brief.limit ?? brief.assets ?? 50,
+    });
+    return {
+      autoComplete: true,
+      deliverableType: "crypto_snapshot",
+      report,
+    };
+  }
+
+  if (serviceKey === "ohlcv") {
+    const report = await buildMarketOhlcvFeed({
+      pairs: brief.pairs ?? brief.market_pairs ?? "BTC-USD,ETH-USD",
+      days: brief.days ?? 365,
+    });
+    return {
+      autoComplete: true,
+      deliverableType: "ohlcv",
+      report,
+    };
+  }
+
+  if (serviceKey === "wallet_readiness") {
+    const address = String(brief.address ?? brief.wallet ?? brief.target_wallet ?? "");
+    const report = await buildReadinessReport(address || SAMPLE_ADDRESS);
+    return {
+      autoComplete: true,
+      deliverableType: "wallet_readiness",
+      report,
+      preview: toPreview(report),
+    };
+  }
+
+  return {
+    autoComplete: false,
+    deliverableType: "implementation_intake",
+    acceptedAt: new Date().toISOString(),
+    summary:
+      "Implementation request accepted for manual review. The provider will scope, execute, and return proof through the402 job thread.",
+    requestedWork: brief,
+    publicProof: {
+      serviceManifest: `${baseUrl()}/manifest`,
+      x402Manifest: `${baseUrl()}/.well-known/x402.json`,
+      the402Manifest: `${baseUrl()}/.well-known/the402.json`,
+    },
+  };
+}
+
+async function maybePostThe402JobUpdate(payload, deliverables) {
+  const updateUrl = String(
+    payload.update_url ?? payload.callback_url ?? payload.result_url ?? "",
+  );
+
+  if (!updateUrl) {
+    return { posted: false, reason: "missing_update_url" };
+  }
+  if (!THE402_API_KEY) {
+    return { posted: false, reason: "THE402_API_KEY_not_configured" };
+  }
+
+  const response = await fetch(updateUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": THE402_API_KEY,
+    },
+    body: JSON.stringify({
+      status: "completed",
+      deliverables,
+    }),
+  });
+
+  return {
+    posted: response.ok,
+    status: response.status,
+    response: await response.text().catch(() => ""),
+  };
+}
+
+function buildThe402Quote(serviceKey, payload) {
+  const service =
+    the402ServiceDefinitions().find((definition) =>
+      inferThe402ServiceKey(definition) === serviceKey
+    ) ?? the402ServiceDefinitions()[3];
+
+  return {
+    service: service.name,
+    pricing: service.price,
+    estimatedDelivery: service.estimated_delivery,
+    providerWallet: PAY_TO,
+    reply:
+      serviceKey === "implementation_triage"
+        ? "I can start with the fixed-price triage package and deliver a public proof bundle plus next patch steps."
+        : "This service is ready through the listed webhook and can return structured JSON deliverables.",
+    source: {
+      threadId: payload.thread_id ?? null,
+      respondUrl: payload.respond_url ?? payload.response_url ?? null,
+    },
+  };
+}
+
+function verifyThe402Signature(req) {
+  const timestamp = String(req.headers["x-webhook-timestamp"] ?? "");
+  const signatureHeader = String(req.headers["x-webhook-signature"] ?? "");
+  const signature = signatureHeader.replace(/^sha256=/i, "");
+  const rawBody = req.rawBody?.length
+    ? req.rawBody
+    : Buffer.from(JSON.stringify(req.body ?? {}));
+
+  if (!/^\d+$/.test(timestamp) || !/^[a-f0-9]{64}$/i.test(signature)) {
+    const error = new Error("invalid the402 webhook signature headers");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const age = Math.abs(Date.now() / 1000 - Number(timestamp));
+  if (age > THE402_WEBHOOK_TOLERANCE_SECONDS) {
+    const error = new Error("stale the402 webhook timestamp");
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const expected = createHmac("sha256", THE402_WEBHOOK_SECRET)
+    .update(rawBody)
+    .digest("hex");
+  if (!constantTimeEqual(signature.toLowerCase(), expected)) {
+    const error = new Error("invalid the402 webhook signature");
+    error.statusCode = 401;
+    throw error;
+  }
+}
+
+function the402Brief(payload) {
+  return objectValue(
+    payload.brief ??
+      payload.input ??
+      payload.payload ??
+      payload.arguments ??
+      payload.request,
+  );
+}
+
+function inferThe402ServiceKey(payload) {
+  const haystack = JSON.stringify(payload).toLowerCase();
+
+  if (
+    haystack.includes("triage") ||
+    haystack.includes("integration") ||
+    haystack.includes("debugging") ||
+    haystack.includes("patch plan") ||
+    haystack.includes("repository_or_url")
+  ) {
+    return "implementation_triage";
+  }
+  if (haystack.includes("ohlcv") || haystack.includes("candles")) {
+    return "ohlcv";
+  }
+  if (
+    haystack.includes("snapshot") ||
+    haystack.includes("price") ||
+    haystack.includes("market cap")
+  ) {
+    return "crypto_snapshot";
+  }
+  if (
+    haystack.includes("wallet") ||
+    haystack.includes("readiness") ||
+    haystack.includes("payout address")
+  ) {
+    return "wallet_readiness";
+  }
+  return "implementation_triage";
+}
+
+function the402Manifest() {
+  return {
+    name: serviceInfo.name,
+    provider_wallet: PAY_TO,
+    network: "base",
+    settlement_asset: "USDC",
+    dashboard_url: "https://the402.ai/dashboard",
+    webhook_url: `${baseUrl()}/api/the402/webhook`,
+    webhook_health: `${baseUrl()}/api/the402/webhook`,
+    source_manifest: `${baseUrl()}/manifest`,
+    x402_manifest: `${baseUrl()}/.well-known/x402.json`,
+    services: the402ServiceDefinitions(),
+    secrets: {
+      requiredForProduction: ["THE402_WEBHOOK_SECRET", "THE402_API_KEY"],
+      custody: "No target wallet seed phrase or private key is required.",
+    },
+  };
+}
+
+function the402ServiceDefinitions() {
+  const webhookUrl = `${baseUrl()}/api/the402/webhook`;
+  return [
+    {
+      name: "Top Crypto Price Snapshot API",
+      description:
+        "Instant JSON snapshot of up to 50 crypto assets with price, market cap, 24h volume/change, and Coinbase USD bid/ask where available.",
+      price: { fixed: "$0.05" },
+      pricing_model: "fixed",
+      service_type: "data_api",
+      fulfillment_type: "instant",
+      estimated_delivery: "10s",
+      category: "data",
+      tags: ["crypto", "market-data", "prices", "base", "x402"],
+      webhook_url: webhookUrl,
+      input_schema: {
+        type: "object",
+        required: [],
+        properties: {
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: 50,
+            description: "Number of top assets to return.",
+          },
+        },
+      },
+      deliverable_schema: {
+        type: "object",
+        properties: {
+          report: { type: "object" },
+        },
+      },
+    },
+    {
+      name: "Daily Crypto OHLCV API",
+      description:
+        "Daily OHLCV candles for BTC-USD, ETH-USD, or SOL-USD from Coinbase Exchange public market data.",
+      price: { fixed: "$0.10" },
+      pricing_model: "fixed",
+      service_type: "data_api",
+      fulfillment_type: "instant",
+      estimated_delivery: "10s",
+      category: "data",
+      tags: ["crypto", "ohlcv", "candles", "coinbase", "x402"],
+      webhook_url: webhookUrl,
+      input_schema: {
+        type: "object",
+        required: [],
+        properties: {
+          pairs: {
+            type: "string",
+            description: "Comma-separated pairs: BTC-USD, ETH-USD, SOL-USD.",
+          },
+          days: {
+            type: "integer",
+            minimum: 1,
+            maximum: 365,
+          },
+        },
+      },
+      deliverable_schema: {
+        type: "object",
+        properties: {
+          report: { type: "object" },
+        },
+      },
+    },
+    {
+      name: "Base Wallet Readiness Check",
+      description:
+        "Instant Base wallet check for native USDC balance, ETH balance, transaction count, token transfers, contract status, and explorer reputation before publishing a payout address.",
+      price: { fixed: "$0.50" },
+      pricing_model: "fixed",
+      service_type: "data_api",
+      fulfillment_type: "instant",
+      estimated_delivery: "10s",
+      category: "crypto",
+      tags: ["base", "usdc", "wallet", "risk", "x402"],
+      webhook_url: webhookUrl,
+      input_schema: {
+        type: "object",
+        required: ["address"],
+        properties: {
+          address: {
+            type: "string",
+            pattern: "^0x[a-fA-F0-9]{40}$",
+            description: "EVM address on Base to check.",
+          },
+        },
+      },
+      deliverable_schema: {
+        type: "object",
+        properties: {
+          report: { type: "object" },
+          preview: { type: "object" },
+        },
+      },
+    },
+    {
+      name: "Base USDC x402 Integration Triage",
+      description:
+        "Same-day implementation triage for a Base USDC/x402 endpoint, marketplace listing, webhook, or receipt verifier. Returns findings, proof links, and a concrete patch plan.",
+      price: { fixed: "$100" },
+      pricing_model: "fixed",
+      service_type: "human_service",
+      fulfillment_type: "human",
+      estimated_delivery: "24h",
+      category: "development",
+      tags: ["x402", "base", "usdc", "integration", "debugging"],
+      webhook_url: webhookUrl,
+      input_schema: {
+        type: "object",
+        required: ["repository_or_url", "goal"],
+        properties: {
+          repository_or_url: {
+            type: "string",
+            description: "GitHub repo, deployment URL, API docs, or failing endpoint.",
+          },
+          goal: {
+            type: "string",
+            description: "What should work when the triage is complete.",
+          },
+          constraints: {
+            type: "string",
+            description: "Deployment, wallet, security, or deadline constraints.",
+          },
+        },
+      },
+      deliverable_schema: {
+        type: "object",
+        properties: {
+          findings: { type: "string" },
+          proof_urls: { type: "array", items: { type: "string" } },
+          patch_plan: { type: "string" },
+        },
+      },
+    },
+  ];
 }
 
 function parseSnapshotLimit(rawLimit) {
@@ -1542,6 +2051,9 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/market/crypto-snapshot?limit=50
 - GET ${baseUrl()}/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 - GET ${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3
+- GET ${baseUrl()}/api/the402/services
+- GET ${baseUrl()}/.well-known/the402.json
+- GET ${baseUrl()}/api/the402/webhook
 
 ## Paid x402 endpoints
 
@@ -1549,6 +2061,14 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/agent-commerce-receipt/${sampleAddress}
 - GET ${baseUrl()}/api/x402/market/crypto-snapshot?limit=50
 - GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
+
+## the402 provider webhook
+
+- POST ${baseUrl()}/api/the402/webhook
+
+Configure THE402_WEBHOOK_SECRET and THE402_API_KEY after provider onboarding.
+The webhook auto-fulfills instant data API jobs and accepts manual x402/Base
+USDC implementation triage jobs without storing wallet private keys.
 
 Use the x402 manifest for exact payment requirements before calling paid endpoints.
 `;
