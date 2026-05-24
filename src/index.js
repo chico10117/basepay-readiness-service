@@ -82,6 +82,9 @@ const serviceInfo = {
       "GET /health",
       "GET /manifest",
       "GET /.well-known/agent-card.json",
+      "GET /.well-known/x402",
+      "GET /.well-known/x402.json",
+      "GET /llms.txt",
       "GET /api/800402/preview",
       "GET /api/preview?address=0x...",
       "GET /api/preview/:address",
@@ -508,38 +511,15 @@ app.get("/.well-known/agent.json", (_req, res) => {
 });
 
 app.get("/.well-known/x402", (_req, res) => {
-  res.json({
-    x402Version: 2,
-    name: serviceInfo.name,
-    description: serviceInfo.description,
-    network: NETWORK,
-    facilitator: FACILITATOR_URL,
-    settlement: {
-      asset: "native USDC",
-      assetContract: USDC_CONTRACT,
-      network: "Base",
-      networkCaip2: NETWORK,
-      payTo: PAY_TO,
-    },
-    resources: [
-      {
-        url: `${baseUrl()}/api/readiness/${SAMPLE_ADDRESS}`,
-        method: "GET",
-        description:
-          "Paid Base wallet readiness report with ETH balance, native USDC balance, tx count, token transfers, and contract status.",
-        mimeType: "application/json",
-        accepts: [x402Accept()],
-      },
-      {
-        url: `${baseUrl()}/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
-        method: "GET",
-        description:
-          "Paid 800402 agent commerce receipt combining identity metadata, x402 payment terms, and wallet-readiness evidence.",
-        mimeType: "application/json",
-        accepts: [x402Accept()],
-      },
-    ],
-  });
+  res.json(x402Manifest());
+});
+
+app.get("/.well-known/x402.json", (_req, res) => {
+  res.json(x402Manifest());
+});
+
+app.get("/llms.txt", (_req, res) => {
+  res.type("text/plain").send(llmsTxt());
 });
 
 app.get("/wallet-sign", (_req, res) => {
@@ -1430,6 +1410,79 @@ function x402Info(path) {
     facilitator: FACILITATOR_URL,
     payTo: PAY_TO,
   };
+}
+
+function x402Manifest() {
+  return {
+    x402Version: 2,
+    name: serviceInfo.name,
+    description: serviceInfo.description,
+    homepage: baseUrl(),
+    manifest: `${baseUrl()}/manifest`,
+    agentCard: `${baseUrl()}/.well-known/agent-card.json`,
+    network: NETWORK,
+    facilitator: FACILITATOR_URL,
+    settlement: {
+      asset: "native USDC",
+      assetContract: USDC_CONTRACT,
+      network: "Base",
+      networkCaip2: NETWORK,
+      payTo: PAY_TO,
+    },
+    resources: [
+      {
+        url: `${baseUrl()}/api/readiness/${SAMPLE_ADDRESS}`,
+        method: "GET",
+        description:
+          "Paid Base wallet readiness report with ETH balance, native USDC balance, tx count, token transfers, and contract status.",
+        mimeType: "application/json",
+        accepts: [x402Accept()],
+      },
+      {
+        url: `${baseUrl()}/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
+        method: "GET",
+        description:
+          "Paid 800402 agent commerce receipt combining identity metadata, x402 payment terms, and wallet-readiness evidence.",
+        mimeType: "application/json",
+        accepts: [x402Accept()],
+      },
+    ],
+  };
+}
+
+function llmsTxt() {
+  const sampleAddress = SAMPLE_ADDRESS;
+  return `# ${serviceInfo.name}
+
+${serviceInfo.description}
+
+Base URL: ${baseUrl()}
+Payment rail: x402 exact payments, native USDC on Base (${NETWORK})
+Receiving wallet: ${PAY_TO}
+Default paid API price: ${PRICE}
+Facilitator: ${FACILITATOR_URL}
+
+## Free discovery endpoints
+
+- GET ${baseUrl()}/manifest
+- GET ${baseUrl()}/.well-known/agent-card.json
+- GET ${baseUrl()}/.well-known/agent.json
+- GET ${baseUrl()}/.well-known/x402
+- GET ${baseUrl()}/.well-known/x402.json
+- GET ${baseUrl()}/llms.txt
+- GET ${baseUrl()}/api/800402/preview
+- GET ${baseUrl()}/api/preview?address=${sampleAddress}
+- GET ${baseUrl()}/api/market/crypto-snapshot?limit=50
+- GET ${baseUrl()}/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
+- GET ${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3
+
+## Paid x402 endpoints
+
+- GET ${baseUrl()}/api/readiness/${sampleAddress}
+- GET ${baseUrl()}/api/agent-commerce-receipt/${sampleAddress}
+
+Use the x402 manifest for exact payment requirements before calling paid endpoints.
+`;
 }
 
 function readinessBazaarOutput() {

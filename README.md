@@ -33,6 +33,9 @@ POST /api/market/ohlcv
 POST /api/market/crypto-snapshot
 GET /api/pyrimid/recommend?need=paid%20mcp%20tool
 POST /api/pyrimid/recommend
+GET /.well-known/x402
+GET /.well-known/x402.json
+GET /llms.txt
 GET /wallet-sign
 ```
 
@@ -113,6 +116,9 @@ Free metadata:
 curl http://localhost:4021/manifest
 curl http://localhost:4021/.well-known/agent-card.json
 curl http://localhost:4021/.well-known/agent.json
+curl http://localhost:4021/.well-known/x402
+curl http://localhost:4021/.well-known/x402.json
+curl http://localhost:4021/llms.txt
 curl http://localhost:4021/api/800402/preview
 curl 'http://localhost:4021/api/preview?address=0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9'
 curl -X POST http://localhost:4021/api/preview \
