@@ -149,7 +149,7 @@ app.use(
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.11.4",
+  version: "0.11.5",
   description:
     "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -1041,6 +1041,11 @@ app.use("/api/x402/services/integration-triage", (req, res, next) => {
     return;
   }
 
+  if (req.method === "POST" && !hasPaymentAttemptHeader(req)) {
+    next();
+    return;
+  }
+
   try {
     parseIntegrationTriageRequest(integrationTriageParams(req));
     next();
@@ -1371,6 +1376,12 @@ function corsAllowHeaders(req) {
       .map(header => header.trim())
       .filter(Boolean),
   ]);
+}
+
+function hasPaymentAttemptHeader(req) {
+  return PAYMENT_REQUEST_HEADERS.some(header => {
+    return header.toLowerCase().includes("payment") && Boolean(req.get(header));
+  });
 }
 
 function uniqueHeaderList(headers) {
