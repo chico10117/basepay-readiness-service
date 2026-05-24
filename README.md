@@ -35,6 +35,7 @@ POST /api/market/crypto-snapshot
 GET /api/dev/repo-snapshot?repo=owner/name
 POST /api/dev/repo-snapshot
 GET /api/weather/current?latitude=37.7749&longitude=-122.4194
+POST /api/tools402/services/integration-triage
 GET /api/agentmint/weather-current
 POST /api/agentmint/weather-current
 GET /api/x402/market/crypto-snapshot?limit=50
@@ -126,6 +127,10 @@ Base USDC/x402 endpoint, marketplace listing, webhook, or receipt-verifier
 work. It accepts either GET query params or a POST JSON body, validates
 `repository_or_url` and `goal` before payment, then returns a paid order receipt
 and 24h delivery instructions after a valid x402 payment.
+
+`POST /api/tools402/services/integration-triage` is a normal `200` JSON
+upstream for tools402 proxy listings. The tools402 proxy handles buyer payment
+before forwarding the same intake fields to this upstream.
 
 The free wallet preview also accepts POST bodies such as
 `{"address":"0x..."}`. POST helpers unwrap AgentMint-style bodies such as

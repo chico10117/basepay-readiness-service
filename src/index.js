@@ -182,6 +182,7 @@ const serviceInfo = {
       "GET /api/dev/repo-snapshot?repo=owner/name",
       "POST /api/dev/repo-snapshot",
       "GET /api/weather/current?latitude=37.7749&longitude=-122.4194",
+      "POST /api/tools402/services/integration-triage",
       "GET /api/agentmint/weather-current",
       "POST /api/agentmint/weather-current",
       "GET /api/pyrimid/recommend?need=paid%20mcp%20tool",
@@ -401,6 +402,14 @@ app.get("/api/weather/current", async (req, res, next) => {
 app.post("/api/weather/current", async (req, res, next) => {
   try {
     res.json(await buildWeatherCurrent(bodyToQuery(req.body)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/tools402/services/integration-triage", async (req, res, next) => {
+  try {
+    res.json(buildTools402IntegrationTriageIntake(bodyToQuery(req.body)));
   } catch (error) {
     next(error);
   }
@@ -1347,9 +1356,9 @@ function forcePaidRouteFinalHeaders(req, res) {
 function bodyToQuery(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return {};
   const source =
-    objectValue(body.input) ??
-    objectValue(body.payload) ??
-    objectValue(body.arguments) ??
+    nonEmptyObjectValue(body.input) ??
+    nonEmptyObjectValue(body.payload) ??
+    nonEmptyObjectValue(body.arguments) ??
     body;
   return Object.fromEntries(
     Object.entries(source)
@@ -1359,6 +1368,11 @@ function bodyToQuery(body) {
         Array.isArray(value) ? value.join(",") : String(value),
       ]),
   );
+}
+
+function nonEmptyObjectValue(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return Object.keys(value).length > 0 ? value : null;
 }
 
 function constantTimeEqual(candidate, expected) {
@@ -2196,6 +2210,58 @@ function buildIntegrationTriageOrder(query) {
       wallet: PAY_TO,
       publicServiceUrl: baseUrl(),
       paidEndpoint: `${baseUrl()}/api/x402/services/integration-triage`,
+      issueTemplate:
+        "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
+    },
+  };
+}
+
+function buildTools402IntegrationTriageIntake(query) {
+  const request = parseIntegrationTriageRequest(query);
+  const acceptedAt = new Date().toISOString();
+  const orderId = createHash("sha256")
+    .update(`tools402\n${acceptedAt}\n${JSON.stringify(request)}`)
+    .digest("hex")
+    .slice(0, 16);
+
+  return {
+    service: "Base USDC x402 Integration Triage",
+    orderId: `tools402-triage-${orderId}`,
+    status: "tools402_intake_received",
+    acceptedAt,
+    payment: {
+      rail: "tools402 proxy",
+      asset: "native USDC",
+      network: "Base",
+      expectedAmountAtomic: x402Accept(INTEGRATION_TRIAGE_X402_PRICE).amount,
+      expectedAmountUsd: priceUsd(INTEGRATION_TRIAGE_X402_PRICE),
+      sellerWallet: PAY_TO,
+      note:
+        "Paid delivery starts when this upstream is reached through a tools402-paid proxy call or another verifiable paid settlement rail.",
+    },
+    request,
+    deliverable: {
+      sla: "24h from paid intake",
+      format: "findings, proof URLs, and a concrete patch or implementation plan",
+      includes: [
+        "x402/Base USDC payment challenge review",
+        "wallet/payTo and facilitator verification",
+        "CORS, cache, preflight, and browser-agent compatibility checks",
+        "marketplace listing or webhook triage",
+        "minimal patch plan with exact reproduction commands",
+      ],
+    },
+    nextSteps: [
+      "Keep this JSON receipt and the tools402 call/payment reference.",
+      "If the target is private, grant access out-of-band and reference the orderId.",
+      "For public work, open a GitHub issue with the orderId and non-secret context.",
+    ],
+    provider: {
+      name: serviceInfo.name,
+      wallet: PAY_TO,
+      publicServiceUrl: baseUrl(),
+      directX402Endpoint: `${baseUrl()}/api/x402/services/integration-triage`,
+      tools402Upstream: `${baseUrl()}/api/tools402/services/integration-triage`,
       issueTemplate:
         "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
     },
