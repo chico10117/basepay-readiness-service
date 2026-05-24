@@ -151,8 +151,8 @@ async function signChallenge(event) {
 
   try {
     const signature =
-      method === "eth_signTypedData_v4"
-        ? await signTypedData(challenge)
+      isTypedDataMethod(method)
+        ? await signTypedData(challenge, method)
         : await provider.request({
             method: "personal_sign",
             params: [challenge, currentAddress],
@@ -170,8 +170,7 @@ async function signChallenge(event) {
       walletMatchesTarget: isTargetWallet(signerAddress),
       chainMatchesBase: (chainIdAfterSign || currentChainId) === BASE_CHAIN_ID,
       method,
-      message:
-        method === "eth_signTypedData_v4" ? JSON.parse(challenge) : challenge,
+      message: isTypedDataMethod(method) ? JSON.parse(challenge) : challenge,
       signature,
       signedAt: new Date().toISOString(),
     };
@@ -188,12 +187,16 @@ async function signChallenge(event) {
   }
 }
 
-async function signTypedData(rawTypedData) {
+async function signTypedData(rawTypedData, method) {
   const typedData = JSON.parse(rawTypedData);
   return provider.request({
-    method: "eth_signTypedData_v4",
+    method,
     params: [currentAddress, JSON.stringify(typedData)],
   });
+}
+
+function isTypedDataMethod(method) {
+  return /^eth_signTypedData(?:_v3|_v4)?$/.test(method);
 }
 
 async function copyResult() {
