@@ -206,6 +206,7 @@ const serviceInfo = {
       "GET /api/x402/dev/repo-snapshot?repo=owner/name",
       "GET /api/x402/weather/current?latitude=37.7749&longitude=-122.4194",
       "GET /api/x402/services/integration-triage?repository_or_url=...&goal=...",
+      "POST /api/x402/services/integration-triage",
     ],
   },
   input: {
@@ -1017,7 +1018,7 @@ app.use("/api/x402/services/integration-triage", (req, res, next) => {
   }
 
   try {
-    parseIntegrationTriageRequest(req.query);
+    parseIntegrationTriageRequest(integrationTriageParams(req));
     next();
   } catch (error) {
     attachPaidRouteBrowserHeaders(req, res);
@@ -1154,6 +1155,20 @@ app.use(
         mimeType: "application/json",
         extensions: integrationTriageDiscoveryExtension(),
       },
+      "POST /api/x402/services/integration-triage": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: INTEGRATION_TRIAGE_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Paid same-day Base USDC/x402 integration triage intake. Accepts JSON body fields and returns a 24h order receipt, proof requirements, and delivery instructions.",
+        mimeType: "application/json",
+        extensions: integrationTriageDiscoveryExtension({ method: "POST" }),
+      },
     },
     resourceServer,
   ),
@@ -1227,7 +1242,15 @@ app.get("/api/x402/weather/current", async (req, res, next) => {
 
 app.get("/api/x402/services/integration-triage", async (req, res, next) => {
   try {
-    res.json(buildIntegrationTriageOrder(req.query));
+    res.json(buildIntegrationTriageOrder(integrationTriageParams(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/x402/services/integration-triage", async (req, res, next) => {
+  try {
+    res.json(buildIntegrationTriageOrder(integrationTriageParams(req)));
   } catch (error) {
     next(error);
   }
@@ -1277,7 +1300,7 @@ function attachPaidRouteBrowserHeaders(req, res) {
     res.vary("Origin");
   }
   res.vary("Access-Control-Request-Headers");
-  res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.set("Access-Control-Allow-Headers", corsAllowHeaders(req));
   res.set("Access-Control-Expose-Headers", PAYMENT_RESPONSE_HEADERS.join(", "));
   res.set("Cache-Control", "private, no-store");
@@ -2099,6 +2122,13 @@ function the402ServiceDefinitions() {
       },
     },
   ];
+}
+
+function integrationTriageParams(req) {
+  if (req.method === "POST") {
+    return typeof req.body === "object" && req.body ? req.body : {};
+  }
+  return req.query;
 }
 
 function parseIntegrationTriageRequest(query) {
@@ -3030,6 +3060,14 @@ function x402Manifest() {
         mimeType: "application/json",
         accepts: [x402Accept(INTEGRATION_TRIAGE_X402_PRICE)],
       },
+      {
+        url: `${baseUrl()}/api/x402/services/integration-triage`,
+        method: "POST",
+        description:
+          "Paid same-day Base USDC/x402 integration triage with JSON intake. Returns a 24h order receipt, proof requirements, and delivery instructions.",
+        mimeType: "application/json",
+        accepts: [x402Accept(INTEGRATION_TRIAGE_X402_PRICE)],
+      },
     ],
   };
 }
@@ -3186,6 +3224,24 @@ function openApiDocument() {
           parameters: integrationTriageOpenApiParameters(),
           outputExample: bazaarOutputExample(integrationTriageDiscoveryExtension()),
         }),
+        post: paidOpenApiOperation({
+          operationId: "postPaidIntegrationTriage",
+          summary: "Paid Base USDC/x402 integration triage",
+          description:
+            "Accepts a paid JSON triage intake for a Base USDC/x402 endpoint, marketplace listing, webhook, or receipt verifier and returns an order receipt with 24h delivery instructions.",
+          price: INTEGRATION_TRIAGE_X402_PRICE,
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: integrationTriageInputSchema(),
+              },
+            },
+          },
+          outputExample: bazaarOutputExample(
+            integrationTriageDiscoveryExtension({ method: "POST" }),
+          ),
+        }),
       },
     },
   };
@@ -3197,6 +3253,7 @@ function paidOpenApiOperation({
   description,
   price,
   parameters = [],
+  requestBody,
   outputExample,
 }) {
   return {
@@ -3204,6 +3261,7 @@ function paidOpenApiOperation({
     summary,
     description,
     parameters,
+    ...(requestBody ? { requestBody } : {}),
     security: [],
     "x-payment-info": {
       price: {
@@ -3332,6 +3390,7 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js
 - GET ${baseUrl()}/api/x402/weather/current?latitude=37.7749&longitude=-122.4194
 - GET ${baseUrl()}/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable
+- POST ${baseUrl()}/api/x402/services/integration-triage
 
 ## the402 provider webhook
 
@@ -3527,9 +3586,9 @@ function weatherCurrentDiscoveryExtension() {
   });
 }
 
-function integrationTriageDiscoveryExtension() {
+function integrationTriageDiscoveryExtension({ method = "GET" } = {}) {
   return declareDiscoveryExtension({
-    method: "GET",
+    method,
     input: {
       repository_or_url: "https://github.com/example/project",
       goal: "Make the x402 Base USDC endpoint browser-agent readable and ready for marketplace listing.",
