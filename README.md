@@ -152,6 +152,11 @@ To use Coinbase CDP's facilitator instead, set `X402_USE_CDP_FACILITATOR=true`
 and provide CDP credentials through environment variables. Do not commit CDP
 credentials.
 
+Coinbase Bazaar discovery requires the CDP facilitator to settle at least one
+paid call with Bazaar metadata; `.well-known/x402.json` and `/llms.txt` are
+public discovery aids, but they do not register the service in Coinbase's
+catalog by themselves.
+
 ## Marketplace Positioning
 
 List as:

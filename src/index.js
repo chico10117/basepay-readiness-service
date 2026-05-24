@@ -8,6 +8,7 @@ import { PyrimidResolver } from "@pyrimid/sdk/resolver";
 import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { paymentMiddleware } from "@x402/express";
+import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 
 const PAY_TO =
   process.env.PAY_TO ?? "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9";
@@ -36,13 +37,17 @@ const PYRIMID_DEFAULT_MAX_PRICE_ATOMIC = Number(
 );
 const FACILITATOR_URL =
   process.env.X402_FACILITATOR_URL ?? "https://facilitator.world.fun";
+const USE_CDP_FACILITATOR = process.env.X402_USE_CDP_FACILITATOR === "true";
+const ACTIVE_FACILITATOR_URL = USE_CDP_FACILITATOR
+  ? coinbaseFacilitator.url
+  : FACILITATOR_URL;
 const PUBLIC_URL = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL) : null;
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 const MARKET_ALLOWED_PAIRS = new Set(["BTC-USD", "ETH-USD", "SOL-USD"]);
 const MARKET_CACHE = new Map();
 
 const facilitatorClient =
-  process.env.X402_USE_CDP_FACILITATOR === "true"
+  USE_CDP_FACILITATOR
     ? new HTTPFacilitatorClient(coinbaseFacilitator)
     : new HTTPFacilitatorClient({ url: FACILITATOR_URL });
 
@@ -75,7 +80,7 @@ const serviceInfo = {
     networkCaip2: NETWORK,
     price: PRICE,
     payTo: PAY_TO,
-    facilitator: FACILITATOR_URL,
+    facilitator: ACTIVE_FACILITATOR_URL,
   },
   endpoints: {
     free: [
@@ -200,7 +205,7 @@ app.get("/api/800402/preview", (_req, res) => {
       identity: "ERC-8004-style agent metadata",
       payment: "x402 exact scheme",
       settlement: "native USDC on Base mainnet",
-      facilitator: FACILITATOR_URL,
+      facilitator: ACTIVE_FACILITATOR_URL,
     },
     agent: agentIdentity(),
     payment: paymentInfo(),
@@ -543,23 +548,7 @@ app.use(
         description:
           "Base wallet payment-readiness check by query parameter. Use ?address=0x...",
         mimeType: "application/json",
-        extensions: {
-          bazaar: {
-            discoverable: true,
-            category: "crypto",
-            tags: ["base", "wallet", "usdc", "payment-safety", "agent-payments"],
-            info: {
-              input: {
-                type: "http",
-                method: "GET",
-                queryParams: {
-                  address: SAMPLE_ADDRESS,
-                },
-              },
-              output: readinessBazaarOutput(),
-            },
-          },
-        },
+        extensions: readinessDiscoveryExtension(),
       },
       "GET /api/readiness/:address": {
         accepts: [
@@ -573,23 +562,7 @@ app.use(
         description:
           "Base wallet payment-readiness check: ETH balance, native USDC balance, tx count, token transfers, and contract status.",
         mimeType: "application/json",
-        extensions: {
-          bazaar: {
-            discoverable: true,
-            category: "crypto",
-            tags: ["base", "wallet", "usdc", "payment-safety", "agent-payments"],
-            info: {
-              input: {
-                type: "http",
-                method: "GET",
-                pathParams: {
-                  address: SAMPLE_ADDRESS,
-                },
-              },
-              output: readinessBazaarOutput(),
-            },
-          },
-        },
+        extensions: readinessDiscoveryExtension({ pathParams: true }),
       },
       "GET /api/agent-commerce-receipt": {
         accepts: [
@@ -603,23 +576,7 @@ app.use(
         description:
           "800402 agent commerce receipt by query parameter. Use ?address=0x...",
         mimeType: "application/json",
-        extensions: {
-          bazaar: {
-            discoverable: true,
-            category: "crypto",
-            tags: ["800402", "erc-8004", "x402", "base", "usdc", "agent-commerce"],
-            info: {
-              input: {
-                type: "http",
-                method: "GET",
-                queryParams: {
-                  address: SAMPLE_ADDRESS,
-                },
-              },
-              output: receiptBazaarOutput(),
-            },
-          },
-        },
+        extensions: receiptDiscoveryExtension(),
       },
       "GET /api/agent-commerce-receipt/:address": {
         accepts: [
@@ -633,23 +590,7 @@ app.use(
         description:
           "800402 agent commerce receipt: agent identity metadata, x402 payment terms, and Base wallet-readiness evidence.",
         mimeType: "application/json",
-        extensions: {
-          bazaar: {
-            discoverable: true,
-            category: "crypto",
-            tags: ["800402", "erc-8004", "x402", "base", "usdc", "agent-commerce"],
-            info: {
-              input: {
-                type: "http",
-                method: "GET",
-                pathParams: {
-                  address: SAMPLE_ADDRESS,
-                },
-              },
-              output: receiptBazaarOutput(),
-            },
-          },
-        },
+        extensions: receiptDiscoveryExtension({ pathParams: true }),
       },
     },
     resourceServer,
@@ -1394,7 +1335,7 @@ function paymentInfo() {
     assetContract: USDC_CONTRACT,
     network: "Base",
     networkCaip2: NETWORK,
-    facilitator: FACILITATOR_URL,
+    facilitator: ACTIVE_FACILITATOR_URL,
     payTo: PAY_TO,
     priceUsd: priceUsd(),
   };
@@ -1407,7 +1348,7 @@ function x402Info(path) {
     priceUsd: priceUsd(),
     asset: USDC_CONTRACT,
     network: NETWORK,
-    facilitator: FACILITATOR_URL,
+    facilitator: ACTIVE_FACILITATOR_URL,
     payTo: PAY_TO,
   };
 }
@@ -1421,7 +1362,7 @@ function x402Manifest() {
     manifest: `${baseUrl()}/manifest`,
     agentCard: `${baseUrl()}/.well-known/agent-card.json`,
     network: NETWORK,
-    facilitator: FACILITATOR_URL,
+    facilitator: ACTIVE_FACILITATOR_URL,
     settlement: {
       asset: "native USDC",
       assetContract: USDC_CONTRACT,
@@ -1460,7 +1401,7 @@ Base URL: ${baseUrl()}
 Payment rail: x402 exact payments, native USDC on Base (${NETWORK})
 Receiving wallet: ${PAY_TO}
 Default paid API price: ${PRICE}
-Facilitator: ${FACILITATOR_URL}
+Facilitator: ${ACTIVE_FACILITATOR_URL}
 
 ## Free discovery endpoints
 
@@ -1483,6 +1424,51 @@ Facilitator: ${FACILITATOR_URL}
 
 Use the x402 manifest for exact payment requirements before calling paid endpoints.
 `;
+}
+
+function readinessDiscoveryExtension(options = {}) {
+  return walletAddressDiscoveryExtension({
+    ...options,
+    output: { example: readinessBazaarOutput().example },
+  });
+}
+
+function receiptDiscoveryExtension(options = {}) {
+  return walletAddressDiscoveryExtension({
+    ...options,
+    output: { example: receiptBazaarOutput().example },
+  });
+}
+
+function walletAddressDiscoveryExtension({ pathParams = false, output }) {
+  const addressSchema = {
+    properties: {
+      address: {
+        type: "string",
+        pattern: "^0x[a-fA-F0-9]{40}$",
+        description: "EVM wallet address on Base.",
+      },
+    },
+    required: ["address"],
+    additionalProperties: false,
+  };
+
+  if (pathParams) {
+    return declareDiscoveryExtension({
+      method: "GET",
+      input: null,
+      pathParams: { address: SAMPLE_ADDRESS },
+      pathParamsSchema: addressSchema,
+      output,
+    });
+  }
+
+  return declareDiscoveryExtension({
+    method: "GET",
+    input: { address: SAMPLE_ADDRESS },
+    inputSchema: addressSchema,
+    output,
+  });
 }
 
 function readinessBazaarOutput() {
