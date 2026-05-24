@@ -126,6 +126,8 @@ const resourceServer = new x402ResourceServer(facilitatorClient).register(
   NETWORK,
   new ExactEvmScheme(),
 );
+let resourceServerReady = false;
+let resourceServerInitPromise = null;
 
 const app = express();
 app.set("trust proxy", true);
@@ -147,7 +149,7 @@ app.use(
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.11.0",
+  version: "0.11.2",
   description:
     "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -1035,6 +1037,25 @@ app.use("/api/x402/services/integration-triage", (req, res, next) => {
   }
 });
 
+app.use(async (req, res, next) => {
+  if (!isPaidRoutePath(req.path)) {
+    next();
+    return;
+  }
+
+  try {
+    await initializeResourceServer();
+    next();
+  } catch (error) {
+    resourceServerInitPromise = null;
+    attachPaidRouteBrowserHeaders(req, res);
+    console.warn(`x402 facilitator initialization failed: ${error.message}`);
+    res.status(502).json({
+      error: "x402 facilitator is temporarily unavailable; retry shortly",
+    });
+  }
+});
+
 app.use(
   paymentMiddleware(
     {
@@ -1180,6 +1201,9 @@ app.use(
       },
     },
     resourceServer,
+    undefined,
+    undefined,
+    false,
   ),
 );
 
@@ -1294,6 +1318,15 @@ function requireMarketApiKey(req) {
     error.statusCode = 401;
     throw error;
   }
+}
+
+async function initializeResourceServer() {
+  if (resourceServerReady) return;
+  if (!resourceServerInitPromise) {
+    resourceServerInitPromise = resourceServer.initialize();
+  }
+  await resourceServerInitPromise;
+  resourceServerReady = true;
 }
 
 function isPaidRoutePath(pathname) {
@@ -3836,13 +3869,29 @@ function baseUrl() {
   return (PUBLIC_URL?.toString() ?? "http://localhost:4021").replace(/\/$/, "");
 }
 
+function integrationTriageOrderUrl(root = baseUrl()) {
+  const url = new URL(`${root}/api/x402/services/integration-triage`);
+  url.searchParams.set("repository_or_url", "https://github.com/example/project");
+  url.searchParams.set(
+    "goal",
+    "Make the x402 Base USDC endpoint browser-agent readable and ready for marketplace listing.",
+  );
+  url.searchParams.set("contact", "github:@buyer");
+  url.searchParams.set(
+    "constraints",
+    "No production writes without approval.",
+  );
+  return url.toString();
+}
+
 function openFrameHtml(options = {}) {
   const root = baseUrl();
   const frameUrl = `${root}/open-frame`;
   const imageUrl = `${root}/open-frame.svg`;
   const previewUrl =
     `${root}/api/preview?address=${encodeURIComponent(SAMPLE_ADDRESS)}`;
-  const orderUrl =
+  const orderUrl = integrationTriageOrderUrl(root);
+  const issueUrl =
     "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml";
   const signerUrl = `${root}/wallet-sign`;
   const refreshedCopy = options.refreshed
@@ -3871,7 +3920,7 @@ function openFrameHtml(options = {}) {
     <meta property="of:button:2" content="Free preview" />
     <meta property="of:button:2:action" content="link" />
     <meta property="of:button:2:target" content="${previewUrl}" />
-    <meta property="of:button:3" content="Order work" />
+    <meta property="of:button:3" content="Pay $100" />
     <meta property="of:button:3:action" content="link" />
     <meta property="of:button:3:target" content="${orderUrl}" />
     <meta property="of:button:4" content="Wallet signer" />
@@ -3886,7 +3935,7 @@ function openFrameHtml(options = {}) {
     <meta property="fc:frame:button:2" content="Free preview" />
     <meta property="fc:frame:button:2:action" content="link" />
     <meta property="fc:frame:button:2:target" content="${previewUrl}" />
-    <meta property="fc:frame:button:3" content="Order work" />
+    <meta property="fc:frame:button:3" content="Pay $100" />
     <meta property="fc:frame:button:3:action" content="link" />
     <meta property="fc:frame:button:3:target" content="${orderUrl}" />
     <meta property="fc:frame:button:4" content="Wallet signer" />
@@ -3903,6 +3952,8 @@ function openFrameHtml(options = {}) {
       <p>${escapeHtml(refreshedCopy)}</p>
       <p>Receiving wallet: <code>${PAY_TO}</code></p>
       <p><a href="${previewUrl}">Open the wallet readiness preview</a></p>
+      <p><a href="${orderUrl}">Start the $100 x402 integration triage order</a></p>
+      <p><a href="${issueUrl}">Add non-secret GitHub context after payment</a></p>
     </main>
   </body>
 </html>`;

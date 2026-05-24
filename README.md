@@ -128,6 +128,14 @@ work. It accepts either GET query params or a POST JSON body, validates
 `repository_or_url` and `goal` before payment, then returns a paid order receipt
 and 24h delivery instructions after a valid x402 payment.
 
+The public root page and Open Frame point buyers directly at the sample
+`100 USDC` integration-triage order URL. GitHub issue context remains a
+secondary path for non-secret repo details after payment.
+
+Facilitator support is initialized lazily on paid routes. If the facilitator is
+temporarily unavailable, paid routes return a controlled `502` instead of
+crashing free pages or metadata routes.
+
 `POST /api/tools402/services/integration-triage` is a normal `200` JSON
 upstream for tools402 proxy listings. The tools402 proxy handles buyer payment
 before forwarding the same intake fields to this upstream.
