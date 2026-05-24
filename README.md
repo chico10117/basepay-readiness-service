@@ -27,6 +27,8 @@ GET /api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/market/crypto-snapshot?limit=50
 POST /api/market/ohlcv
 POST /api/market/crypto-snapshot
+GET /api/pyrimid/recommend?need=paid%20mcp%20tool
+POST /api/pyrimid/recommend
 GET /wallet-sign
 ```
 
@@ -73,6 +75,11 @@ The POST wrappers accept JSON bodies such as `{"limit": 50}` or
 `{"pairs": ["BTC-USD", "ETH-USD"], "days": 365}` so marketplace probes can call
 the data feeds without query-string construction.
 
+The Pyrimid recommender uses the official `@pyrimid/sdk` resolver to recommend
+paid MCP/API products by natural-language need. It returns the product endpoint,
+x402 purchase header, affiliate split estimate, and the target Base USDC payout
+wallet, but it does not sign or spend from any wallet.
+
 The wallet signer at `/wallet-sign` is a client-side helper for producing
 `personal_sign` or `eth_signTypedData_v4` payloads from the published Base
 receiving wallet. It does not post messages or signatures back to the server.
@@ -104,6 +111,7 @@ curl 'http://localhost:4021/api/market/crypto-snapshot?limit=50'
 curl -X POST http://localhost:4021/api/market/crypto-snapshot \
   -H 'content-type: application/json' \
   -d '{"limit": 3}'
+curl 'http://localhost:4021/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3'
 ```
 
 The `agent-commerce-receipt` endpoint is the 800402 demo surface. It combines

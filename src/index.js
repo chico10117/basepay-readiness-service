@@ -3,6 +3,8 @@ import { timingSafeEqual } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { facilitator as coinbaseFacilitator } from "@coinbase/x402";
+import { calculateSplit } from "@pyrimid/sdk/middleware";
+import { PyrimidResolver } from "@pyrimid/sdk/resolver";
 import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { paymentMiddleware } from "@x402/express";
@@ -24,6 +26,13 @@ const MARKET_FEED_API_KEY = process.env.MARKET_FEED_API_KEY ?? "";
 const MARKET_CACHE_TTL_SECONDS = Number(process.env.MARKET_CACHE_TTL_SECONDS ?? "900");
 const MARKET_SNAPSHOT_CACHE_TTL_SECONDS = Number(
   process.env.MARKET_SNAPSHOT_CACHE_TTL_SECONDS ?? "60",
+);
+const PYRIMID_AFFILIATE_ID =
+  process.env.PYRIMID_AFFILIATE_ID ?? "agent-commerce-desk";
+const PYRIMID_CATALOG_URL =
+  process.env.PYRIMID_CATALOG_URL ?? "https://pyrimid.ai/api/v1/catalog";
+const PYRIMID_DEFAULT_MAX_PRICE_ATOMIC = Number(
+  process.env.PYRIMID_DEFAULT_MAX_PRICE_ATOMIC ?? "1000000",
 );
 const FACILITATOR_URL =
   process.env.X402_FACILITATOR_URL ?? "https://facilitator.world.fun";
@@ -78,6 +87,8 @@ const serviceInfo = {
       "GET /api/market/crypto-snapshot?limit=50",
       "POST /api/market/ohlcv",
       "POST /api/market/crypto-snapshot",
+      "GET /api/pyrimid/recommend?need=paid%20mcp%20tool",
+      "POST /api/pyrimid/recommend",
       "GET /wallet-sign",
     ],
     paid: [
@@ -153,6 +164,14 @@ const serviceInfo = {
   ],
   tools: {
     walletSignatureHelper: "/wallet-sign",
+    pyrimidRecommendations: "/api/pyrimid/recommend",
+  },
+  pyrimid: {
+    integrationPath: "embedded_resolver",
+    sdk: "@pyrimid/sdk",
+    affiliateId: PYRIMID_AFFILIATE_ID,
+    catalogUrl: PYRIMID_CATALOG_URL,
+    payoutWallet: PAY_TO,
   },
 };
 
@@ -220,6 +239,22 @@ app.post("/api/market/crypto-snapshot", async (req, res, next) => {
   try {
     requireMarketApiKey(req);
     res.json(await buildCryptoSnapshotFeed(bodyToQuery(req.body)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/pyrimid/recommend", async (req, res, next) => {
+  try {
+    res.json(await buildPyrimidRecommendations(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/pyrimid/recommend", async (req, res, next) => {
+  try {
+    res.json(await buildPyrimidRecommendations(bodyToQuery(req.body)));
   } catch (error) {
     next(error);
   }
@@ -350,6 +385,38 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
           },
         },
       },
+      {
+        name: "pyrimid_product_recommendations",
+        endpoint: "/api/pyrimid/recommend",
+        method: "GET",
+        payment: {
+          mode: "free",
+          settlement:
+            "affiliate recommendations only; purchases happen client-side through x402/Base USDC",
+          affiliateId: PYRIMID_AFFILIATE_ID,
+          payoutWallet: PAY_TO,
+        },
+        endpointUrl: "/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3",
+        inputSchema: {
+          type: "object",
+          properties: {
+            need: {
+              type: "string",
+              example: "paid mcp tool",
+            },
+            limit: {
+              type: "integer",
+              minimum: 1,
+              maximum: 10,
+            },
+            maxPriceUsd: {
+              type: "number",
+              minimum: 0,
+              maximum: 1000,
+            },
+          },
+        },
+      },
     ],
   });
 });
@@ -418,6 +485,14 @@ app.get("/.well-known/agent.json", (_req, res) => {
         method: "POST",
       },
       {
+        id: "pyrimid-product-recommendations",
+        name: "Pyrimid Product Recommendations",
+        description:
+          "Official @pyrimid/sdk resolver integration that recommends paid MCP/API products by natural-language need and returns x402 purchase metadata plus affiliate split estimates.",
+        uri: "/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3",
+        method: "GET",
+      },
+      {
         id: "target-wallet-signature-helper",
         name: "Target Wallet Signature Helper",
         description:
@@ -427,6 +502,7 @@ app.get("/.well-known/agent.json", (_req, res) => {
       },
     ],
     payment: paymentInfo(),
+    pyrimid: pyrimidInfo(),
     x402: x402Info(`/api/readiness/${SAMPLE_ADDRESS}`),
   });
 });
@@ -749,6 +825,54 @@ async function buildCryptoSnapshotFeed(query) {
   };
 }
 
+async function buildPyrimidRecommendations(query) {
+  const need = parsePyrimidNeed(query.need);
+  const limit = parseRecommendationLimit(query.limit);
+  const maxPriceAtomic = parseMaxPriceAtomic(query.maxPriceUsd);
+  const resolver = new PyrimidResolver({
+    affiliateId: PYRIMID_AFFILIATE_ID,
+    catalogUrl: PYRIMID_CATALOG_URL,
+    maxPriceUsdc: maxPriceAtomic,
+    preferVerifiedVendors: true,
+  });
+  const startedAt = Date.now();
+  const [products, affiliateStats] = await Promise.all([
+    resolver.findProducts(need, limit),
+    resolver.getStats().catch((error) => ({
+      error: error.message,
+      registered: false,
+    })),
+  ]);
+
+  return {
+    service: "Agent Commerce Desk Pyrimid Recommender",
+    version: serviceInfo.version,
+    generatedAt: new Date().toISOString(),
+    integration: pyrimidInfo(),
+    request: {
+      need,
+      limit,
+      maxPriceAtomic,
+      maxPriceDisplay: formatUsdcAtomic(maxPriceAtomic),
+    },
+    affiliate: {
+      id: PYRIMID_AFFILIATE_ID,
+      payoutWallet: PAY_TO,
+      stats: affiliateStats,
+      purchaseHeader: {
+        "X-Affiliate-ID": PYRIMID_AFFILIATE_ID,
+      },
+    },
+    recommendations: products.map(toPyrimidRecommendation),
+    safety: {
+      custody: "no private keys or seed phrases are requested or stored",
+      spending:
+        "this endpoint only discovers/recommends products; buyers sign and pay in their own wallet runtime",
+    },
+    latencyMs: Date.now() - startedAt,
+  };
+}
+
 function parseSnapshotLimit(rawLimit) {
   const limit = Number(rawLimit || 50);
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
@@ -757,6 +881,93 @@ function parseSnapshotLimit(rawLimit) {
     throw error;
   }
   return limit;
+}
+
+function parsePyrimidNeed(rawNeed) {
+  const need = String(rawNeed || "paid mcp tool").trim();
+  if (need.length < 2 || need.length > 160) {
+    const error = new Error("need must be between 2 and 160 characters");
+    error.statusCode = 400;
+    throw error;
+  }
+  return need;
+}
+
+function parseRecommendationLimit(rawLimit) {
+  const limit = Number(rawLimit || 5);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 10) {
+    const error = new Error("limit must be an integer between 1 and 10");
+    error.statusCode = 400;
+    throw error;
+  }
+  return limit;
+}
+
+function parseMaxPriceAtomic(rawMaxPriceUsd) {
+  if (rawMaxPriceUsd == null || rawMaxPriceUsd === "") {
+    return PYRIMID_DEFAULT_MAX_PRICE_ATOMIC;
+  }
+
+  const maxPriceUsd = Number(rawMaxPriceUsd);
+  if (!Number.isFinite(maxPriceUsd) || maxPriceUsd <= 0 || maxPriceUsd > 1000) {
+    const error = new Error("maxPriceUsd must be a number greater than 0 and at most 1000");
+    error.statusCode = 400;
+    throw error;
+  }
+  return Math.round(maxPriceUsd * 1_000_000);
+}
+
+function toPyrimidRecommendation(product, index) {
+  const split = calculateSplit(product.price_usdc, product.affiliate_bps);
+
+  return {
+    rank: index + 1,
+    productId: product.product_id,
+    vendorId: product.vendor_id,
+    vendorName: product.vendor_name,
+    description: product.description,
+    category: product.category,
+    tags: product.tags,
+    endpoint: product.endpoint,
+    method: product.method,
+    network: product.network,
+    asset: product.asset,
+    source: product.source,
+    sdkIntegrated: Boolean(product.sdk_integrated),
+    price: {
+      atomic: product.price_usdc,
+      display: product.price_display ?? formatUsdcAtomic(product.price_usdc),
+    },
+    affiliate: {
+      id: PYRIMID_AFFILIATE_ID,
+      bps: product.affiliate_bps,
+      estimatedSplit: {
+        protocolFee: {
+          atomic: split.protocol_fee,
+          display: formatUsdcAtomic(split.protocol_fee),
+        },
+        affiliateCommission: {
+          atomic: split.affiliate_commission,
+          display: formatUsdcAtomic(split.affiliate_commission),
+        },
+        vendorShare: {
+          atomic: split.vendor_share,
+          display: formatUsdcAtomic(split.vendor_share),
+        },
+      },
+    },
+    purchase: {
+      requestHeaders: {
+        "X-Affiliate-ID": PYRIMID_AFFILIATE_ID,
+      },
+      expectedFirstResponse:
+        "HTTP 402 with Base USDC x402 payment requirements before buyer-side payment",
+    },
+  };
+}
+
+function formatUsdcAtomic(value) {
+  return `$${(Number(value) / 1_000_000).toFixed(6).replace(/\.?0+$/, "")}`;
 }
 
 async function getCryptoSnapshot(limit) {
@@ -1152,8 +1363,27 @@ function agentIdentity() {
         payment: "free",
         endpoint: `${baseUrl()}/wallet-sign`,
       },
+      {
+        name: "Pyrimid product recommendations",
+        transport: "https",
+        payment: "free",
+        endpoint: `${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3`,
+      },
     ],
     supportedTrust: ["erc-8004", "x402", "base-usdc"],
+  };
+}
+
+function pyrimidInfo() {
+  return {
+    sdk: "@pyrimid/sdk",
+    integrationPath: "embedded_resolver",
+    catalogUrl: PYRIMID_CATALOG_URL,
+    affiliateId: PYRIMID_AFFILIATE_ID,
+    payoutWallet: PAY_TO,
+    recommendationEndpoint:
+      `${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3`,
+    docs: "https://pyrimid.ai/quickstart",
   };
 }
 

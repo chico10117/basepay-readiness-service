@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@coinbase/x402": "^2.1.0",
+    "@pyrimid/sdk": "^0.2.6",
     "@x402/core": "^2.13.0",
     "@x402/evm": "^2.13.0",
     "@x402/express": "^2.13.0",
