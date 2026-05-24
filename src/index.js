@@ -149,7 +149,7 @@ app.use(
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.11.2",
+  version: "0.11.3",
   description:
     "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -168,6 +168,7 @@ const serviceInfo = {
       "GET /manifest",
       "GET /openapi.json",
       "GET /.well-known/agent-card.json",
+      "GET /.well-known/ai.txt",
       "GET /.well-known/x402",
       "GET /.well-known/x402.json",
       "GET /favicon.svg",
@@ -973,6 +974,10 @@ app.get("/.well-known/x402", (_req, res) => {
 
 app.get("/.well-known/x402.json", (_req, res) => {
   res.json(x402Manifest());
+});
+
+app.get("/.well-known/ai.txt", (_req, res) => {
+  res.type("text/plain").send(aiTxt());
 });
 
 app.get("/.well-known/402index-verify.txt", (_req, res) => {
@@ -3501,6 +3506,34 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 Configure THE402_WEBHOOK_SECRET and THE402_API_KEY after provider onboarding.
 The webhook auto-fulfills instant data API jobs and accepts manual x402/Base
 USDC implementation triage jobs without storing wallet private keys.
+
+Use the x402 manifest for exact payment requirements before calling paid endpoints.
+`;
+}
+
+function aiTxt() {
+  return `# Agent Commerce Desk
+
+Description: ${serviceInfo.description}
+Base URL: ${baseUrl()}
+Agent card: ${baseUrl()}/.well-known/agent-card.json
+x402 manifest: ${baseUrl()}/.well-known/x402.json
+OpenAPI: ${baseUrl()}/openapi.json
+Payment rail: native USDC on Base via x402 exact payments
+USDC contract: ${USDC_CONTRACT}
+Network: ${NETWORK}
+Payout wallet: ${PAY_TO}
+Facilitator: ${ACTIVE_FACILITATOR_URL}
+
+## Paid services
+
+- Base wallet readiness report: GET ${baseUrl()}/api/readiness/${SAMPLE_ADDRESS} (${PRICE})
+- Agent commerce receipt: GET ${baseUrl()}/api/agent-commerce-receipt/${SAMPLE_ADDRESS} (${PRICE})
+- Crypto market snapshot: GET ${baseUrl()}/api/x402/market/crypto-snapshot?limit=50 (${MARKET_SNAPSHOT_X402_PRICE})
+- Daily crypto OHLCV feed: GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365 (${MARKET_OHLCV_X402_PRICE})
+- GitHub repo intelligence snapshot: GET ${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js (${DEV_REPO_SNAPSHOT_X402_PRICE})
+- Current weather snapshot: GET ${baseUrl()}/api/x402/weather/current?latitude=37.7749&longitude=-122.4194 (${WEATHER_CURRENT_X402_PRICE})
+- Fixed-price x402 integration triage: POST ${baseUrl()}/api/x402/services/integration-triage (${INTEGRATION_TRIAGE_X402_PRICE})
 
 Use the x402 manifest for exact payment requirements before calling paid endpoints.
 `;
