@@ -132,6 +132,8 @@ const serviceInfo = {
       "GET /api/dev/repo-snapshot?repo=owner/name",
       "POST /api/dev/repo-snapshot",
       "GET /api/weather/current?latitude=37.7749&longitude=-122.4194",
+      "GET /api/agentmint/weather-current",
+      "POST /api/agentmint/weather-current",
       "GET /api/pyrimid/recommend?need=paid%20mcp%20tool",
       "POST /api/pyrimid/recommend",
       "GET /.well-known/the402.json",
@@ -337,6 +339,36 @@ app.get("/api/weather/current", async (req, res, next) => {
 app.post("/api/weather/current", async (req, res, next) => {
   try {
     res.json(await buildWeatherCurrent(bodyToQuery(req.body)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/agentmint/weather-current", async (req, res, next) => {
+  try {
+    if (req.query.challenge) {
+      res.type("text/plain").send(String(req.query.challenge));
+      return;
+    }
+    res.json({
+      ok: true,
+      service: "AgentMint weather webhook",
+      description:
+        "POST AgentMint invocation bodies with input.latitude and input.longitude.",
+      sampleInput: {
+        latitude: 37.7749,
+        longitude: -122.4194,
+        forecast_days: 2,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/agentmint/weather-current", async (req, res, next) => {
+  try {
+    res.json({ output: await buildWeatherCurrent(bodyToQuery(req.body)) });
   } catch (error) {
     next(error);
   }
@@ -1080,8 +1112,13 @@ function requireMarketApiKey(req) {
 
 function bodyToQuery(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return {};
+  const source =
+    objectValue(body.input) ??
+    objectValue(body.payload) ??
+    objectValue(body.arguments) ??
+    body;
   return Object.fromEntries(
-    Object.entries(body)
+    Object.entries(source)
       .filter(([, value]) => value != null)
       .map(([key, value]) => [
         key,

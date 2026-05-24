@@ -35,6 +35,8 @@ POST /api/market/crypto-snapshot
 GET /api/dev/repo-snapshot?repo=owner/name
 POST /api/dev/repo-snapshot
 GET /api/weather/current?latitude=37.7749&longitude=-122.4194
+GET /api/agentmint/weather-current
+POST /api/agentmint/weather-current
 GET /api/x402/market/crypto-snapshot?limit=50
 GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 GET /api/x402/dev/repo-snapshot?repo=owner/name
@@ -112,7 +114,8 @@ GET /api/x402/weather/current?latitude=37.7749&longitude=-122.4194  # $0.01
 ```
 
 The free wallet preview also accepts POST bodies such as
-`{"address":"0x..."}`. This keeps marketplace webhook calls usable when the
+`{"address":"0x..."}`. POST helpers unwrap AgentMint-style bodies such as
+`{"input":{...}}`, keeping marketplace webhook calls usable when the
 marketplace invokes a published skill by POST instead of GET.
 
 The Pyrimid recommender uses the official `@pyrimid/sdk` resolver to recommend
@@ -175,6 +178,9 @@ curl 'http://localhost:4021/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
 curl 'http://localhost:4021/api/market/crypto-snapshot?limit=50'
 curl 'http://localhost:4021/api/dev/repo-snapshot?repo=vercel/next.js'
 curl 'http://localhost:4021/api/weather/current?latitude=37.7749&longitude=-122.4194'
+curl -X POST http://localhost:4021/api/agentmint/weather-current \
+  -H 'content-type: application/json' \
+  -d '{"input":{"latitude":37.7749,"longitude":-122.4194,"forecast_days":2}}'
 curl -X POST http://localhost:4021/api/market/crypto-snapshot \
   -H 'content-type: application/json' \
   -d '{"limit": 3}'
