@@ -24,6 +24,8 @@ const DEV_REPO_SNAPSHOT_X402_PRICE =
   process.env.DEV_REPO_SNAPSHOT_X402_PRICE ?? "$0.05";
 const WEATHER_CURRENT_X402_PRICE =
   process.env.WEATHER_CURRENT_X402_PRICE ?? "$0.01";
+const QUICK_REVIEW_X402_PRICE =
+  process.env.QUICK_REVIEW_X402_PRICE ?? "$50";
 const INTEGRATION_TRIAGE_X402_PRICE =
   process.env.INTEGRATION_TRIAGE_X402_PRICE ?? "$100";
 const BASE_RPC = process.env.BASE_RPC ?? "https://mainnet.base.org";
@@ -77,6 +79,7 @@ const PAID_ROUTE_PREFIXES = [
   "/api/x402/market/ohlcv",
   "/api/x402/dev/repo-snapshot",
   "/api/x402/weather/current",
+  "/api/x402/services/quick-review",
   "/api/x402/services/integration-triage",
 ];
 const PAYMENT_REQUEST_HEADERS = [
@@ -149,7 +152,7 @@ app.use(
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.11.7",
+  version: "0.11.8",
   description:
     "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -185,6 +188,8 @@ const serviceInfo = {
       "GET /api/dev/repo-snapshot?repo=owner/name",
       "POST /api/dev/repo-snapshot",
       "GET /api/weather/current?latitude=37.7749&longitude=-122.4194",
+      "GET /api/tools402/services/quick-review",
+      "POST /api/tools402/services/quick-review",
       "POST /api/tools402/services/integration-triage",
       "GET /api/agentmint/weather-current",
       "POST /api/agentmint/weather-current",
@@ -209,6 +214,8 @@ const serviceInfo = {
       "GET /api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
       "GET /api/x402/dev/repo-snapshot?repo=owner/name",
       "GET /api/x402/weather/current?latitude=37.7749&longitude=-122.4194",
+      "GET /api/x402/services/quick-review?repository_or_url=...&goal=...",
+      "POST /api/x402/services/quick-review",
       "GET /api/x402/services/integration-triage?repository_or_url=...&goal=...",
       "POST /api/x402/services/integration-triage",
     ],
@@ -217,6 +224,16 @@ const serviceInfo = {
     address: `EVM address on Base, e.g. ${SAMPLE_ADDRESS}`,
   },
   offers: [
+    {
+      name: "Quick x402 readback",
+      priceUsd: 50,
+      deliverables: [
+        "one public endpoint or repo readback",
+        "payment challenge proof",
+        "top blocker list",
+        "next patch recommendation",
+      ],
+    },
     {
       name: "Same-day kickoff",
       priceUsd: 100,
@@ -418,9 +435,25 @@ app.post("/api/tools402/services/integration-triage", async (req, res, next) => 
   }
 });
 
+app.post("/api/tools402/services/quick-review", async (req, res, next) => {
+  try {
+    res.json(buildTools402QuickReviewIntake(bodyToQuery(req.body)));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/tools402/services/integration-triage", async (req, res, next) => {
   try {
     res.json(buildTools402IntegrationTriageIntake(req.query));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/tools402/services/quick-review", async (req, res, next) => {
+  try {
+    res.json(buildTools402QuickReviewIntake(req.query));
   } catch (error) {
     next(error);
   }
@@ -930,6 +963,14 @@ app.get("/.well-known/agent.json", (_req, res) => {
         method: "GET",
       },
       {
+        id: "paid-base-usdc-x402-quick-review",
+        name: "Paid Base USDC x402 Quick Review",
+        description:
+          "Fixed-price x402 human-service intake for one Base USDC/x402 endpoint, marketplace listing, webhook, or payment challenge readback.",
+        uri: "/api/x402/services/quick-review?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Verify%20the%20x402%20payment%20challenge%20and%20identify%20the%20next%20patch",
+        method: "GET",
+      },
+      {
         id: "paid-base-usdc-x402-integration-triage",
         name: "Paid Base USDC x402 Integration Triage",
         description:
@@ -1035,25 +1076,8 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use("/api/x402/services/integration-triage", (req, res, next) => {
-  if (req.method === "OPTIONS") {
-    next();
-    return;
-  }
-
-  if (req.method === "POST" && !hasPaymentAttemptHeader(req)) {
-    next();
-    return;
-  }
-
-  try {
-    parseIntegrationTriageRequest(integrationTriageParams(req));
-    next();
-  } catch (error) {
-    attachPaidRouteBrowserHeaders(req, res);
-    res.status(error.statusCode ?? 400).json({ error: error.message });
-  }
-});
+app.use("/api/x402/services/integration-triage", validatePaidServiceIntake);
+app.use("/api/x402/services/quick-review", validatePaidServiceIntake);
 
 app.use(async (req, res, next) => {
   if (!isPaidRoutePath(req.path)) {
@@ -1189,6 +1213,45 @@ app.use(
         mimeType: "application/json",
         extensions: weatherCurrentDiscoveryExtension(),
       },
+      "GET /api/x402/services/quick-review": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: QUICK_REVIEW_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Paid quick Base USDC/x402 readback intake. Returns a focused order receipt, proof requirements, and review instructions.",
+        mimeType: "application/json",
+        extensions: integrationTriageDiscoveryExtension({
+          service: "Base USDC x402 Quick Review",
+          price: QUICK_REVIEW_X402_PRICE,
+          sla: "12h from paid intake",
+          goal: "Verify the x402 payment challenge and identify the next patch.",
+        }),
+      },
+      "POST /api/x402/services/quick-review": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: QUICK_REVIEW_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Paid quick Base USDC/x402 readback intake. Accepts JSON body fields and returns a focused order receipt, proof requirements, and review instructions.",
+        mimeType: "application/json",
+        extensions: integrationTriageDiscoveryExtension({
+          method: "POST",
+          service: "Base USDC x402 Quick Review",
+          price: QUICK_REVIEW_X402_PRICE,
+          sla: "12h from paid intake",
+          goal: "Verify the x402 payment challenge and identify the next patch.",
+        }),
+      },
       "GET /api/x402/services/integration-triage": {
         accepts: [
           {
@@ -1299,9 +1362,25 @@ app.get("/api/x402/services/integration-triage", async (req, res, next) => {
   }
 });
 
+app.get("/api/x402/services/quick-review", async (req, res, next) => {
+  try {
+    res.json(buildQuickReviewOrder(integrationTriageParams(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/x402/services/integration-triage", async (req, res, next) => {
   try {
     res.json(buildIntegrationTriageOrder(integrationTriageParams(req)));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/x402/services/quick-review", async (req, res, next) => {
+  try {
+    res.json(buildQuickReviewOrder(integrationTriageParams(req)));
   } catch (error) {
     next(error);
   }
@@ -2173,6 +2252,30 @@ function the402ServiceDefinitions() {
       },
     },
     {
+      name: "Base USDC x402 Quick Review",
+      description:
+        "Focused readback for one Base USDC/x402 endpoint, marketplace listing, webhook, or payment challenge. Returns proof commands, blockers, and the next patch recommendation.",
+      price: { fixed: "$50" },
+      pricing_model: "fixed",
+      service_type: "human_service",
+      fulfillment_type: "human",
+      estimated_delivery: "12h",
+      category: "development",
+      tags: ["x402", "base", "usdc", "review", "debugging"],
+      webhook_url: webhookUrl,
+      purchase_url: `${baseUrl()}/api/x402/services/quick-review`,
+      input_schema: integrationTriageInputSchema(),
+      deliverable_schema: {
+        type: "object",
+        properties: {
+          readback: { type: "string" },
+          proof_commands: { type: "array", items: { type: "string" } },
+          blockers: { type: "array", items: { type: "string" } },
+          next_patch: { type: "string" },
+        },
+      },
+    },
+    {
       name: "Base USDC x402 Integration Triage",
       description:
         "Same-day implementation triage for a Base USDC/x402 endpoint, marketplace listing, webhook, or receipt verifier. Returns findings, proof links, and a concrete patch plan.",
@@ -2205,6 +2308,26 @@ function integrationTriageParams(req) {
   return req.query;
 }
 
+function validatePaidServiceIntake(req, res, next) {
+  if (req.method === "OPTIONS") {
+    next();
+    return;
+  }
+
+  if (req.method === "POST" && !hasPaymentAttemptHeader(req)) {
+    next();
+    return;
+  }
+
+  try {
+    parseIntegrationTriageRequest(integrationTriageParams(req));
+    next();
+  } catch (error) {
+    attachPaidRouteBrowserHeaders(req, res);
+    res.status(error.statusCode ?? 400).json({ error: error.message });
+  }
+}
+
 function parseIntegrationTriageRequest(query) {
   return {
     repository_or_url: requiredQueryString(
@@ -2215,6 +2338,61 @@ function parseIntegrationTriageRequest(query) {
     goal: requiredQueryString(query.goal, "goal", 800),
     contact: optionalQueryString(query.contact, 300),
     constraints: optionalQueryString(query.constraints, 1000),
+  };
+}
+
+function buildQuickReviewOrder(query) {
+  const request = parseIntegrationTriageRequest(query);
+  const acceptedAt = new Date().toISOString();
+  const orderId = createHash("sha256")
+    .update(`quick-review\n${acceptedAt}\n${JSON.stringify(request)}`)
+    .digest("hex")
+    .slice(0, 16);
+
+  return {
+    service: "Base USDC x402 Quick Review",
+    orderId: `quick-${orderId}`,
+    status: "paid_intake_received",
+    acceptedAt,
+    payment: {
+      asset: "native USDC",
+      assetContract: USDC_CONTRACT,
+      network: "Base",
+      networkCaip2: NETWORK,
+      expectedAmountAtomic: x402Accept(QUICK_REVIEW_X402_PRICE).amount,
+      expectedAmountUsd: priceUsd(QUICK_REVIEW_X402_PRICE),
+      payTo: PAY_TO,
+      facilitator: ACTIVE_FACILITATOR_URL,
+    },
+    request,
+    deliverable: {
+      sla: "12h from paid intake",
+      format: "focused readback, exact proof commands, and the next patch recommendation",
+      includes: [
+        "x402/Base USDC payment challenge readback",
+        "wallet/payTo and amount verification",
+        "CORS, cache, preflight, or marketplace probe checks for one endpoint",
+        "top blockers ranked by buyer impact",
+      ],
+      excludes: [
+        "custody of private keys or seed phrases",
+        "production writes, payments, or deployments without explicit owner approval",
+        "multi-service implementation work beyond the reviewed endpoint",
+      ],
+    },
+    nextSteps: [
+      "Keep this JSON receipt and the x402 payment transaction hash.",
+      "Attach public repo, endpoint, or marketplace context to the orderId.",
+      "For private work, grant read-only access out-of-band and reference the orderId.",
+    ],
+    provider: {
+      name: serviceInfo.name,
+      wallet: PAY_TO,
+      publicServiceUrl: baseUrl(),
+      paidEndpoint: `${baseUrl()}/api/x402/services/quick-review`,
+      issueTemplate:
+        "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
+    },
   };
 }
 
@@ -2267,6 +2445,57 @@ function buildIntegrationTriageOrder(query) {
       wallet: PAY_TO,
       publicServiceUrl: baseUrl(),
       paidEndpoint: `${baseUrl()}/api/x402/services/integration-triage`,
+      issueTemplate:
+        "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
+    },
+  };
+}
+
+function buildTools402QuickReviewIntake(query) {
+  const request = parseIntegrationTriageRequest(query);
+  const acceptedAt = new Date().toISOString();
+  const orderId = createHash("sha256")
+    .update(`tools402-quick-review\n${acceptedAt}\n${JSON.stringify(request)}`)
+    .digest("hex")
+    .slice(0, 16);
+
+  return {
+    service: "Base USDC x402 Quick Review",
+    orderId: `tools402-quick-${orderId}`,
+    status: "tools402_intake_received",
+    acceptedAt,
+    payment: {
+      rail: "tools402 proxy",
+      asset: "native USDC",
+      network: "Base",
+      expectedAmountAtomic: x402Accept(QUICK_REVIEW_X402_PRICE).amount,
+      expectedAmountUsd: priceUsd(QUICK_REVIEW_X402_PRICE),
+      sellerWallet: PAY_TO,
+      note:
+        "Paid delivery starts when this upstream is reached through a tools402-paid proxy call or another verifiable paid settlement rail.",
+    },
+    request,
+    deliverable: {
+      sla: "12h from paid intake",
+      format: "focused readback, exact proof commands, and the next patch recommendation",
+      includes: [
+        "x402/Base USDC payment challenge readback",
+        "wallet/payTo and amount verification",
+        "CORS, cache, preflight, or marketplace probe checks for one endpoint",
+        "top blockers ranked by buyer impact",
+      ],
+    },
+    nextSteps: [
+      "Keep this JSON receipt and the tools402 call/payment reference.",
+      "Attach public repo, endpoint, or marketplace context to the orderId.",
+      "For private work, grant read-only access out-of-band and reference the orderId.",
+    ],
+    provider: {
+      name: serviceInfo.name,
+      wallet: PAY_TO,
+      publicServiceUrl: baseUrl(),
+      directX402Endpoint: `${baseUrl()}/api/x402/services/quick-review`,
+      tools402Upstream: `${baseUrl()}/api/tools402/services/quick-review`,
       issueTemplate:
         "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
     },
@@ -3179,6 +3408,22 @@ function x402Manifest() {
         accepts: [x402Accept(WEATHER_CURRENT_X402_PRICE)],
       },
       {
+        url: `${baseUrl()}/api/x402/services/quick-review?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Verify%20the%20x402%20payment%20challenge%20and%20identify%20the%20next%20patch`,
+        method: "GET",
+        description:
+          "Paid quick Base USDC/x402 review. Returns a 12h order receipt, proof requirements, and review instructions.",
+        mimeType: "application/json",
+        accepts: [x402Accept(QUICK_REVIEW_X402_PRICE)],
+      },
+      {
+        url: `${baseUrl()}/api/x402/services/quick-review`,
+        method: "POST",
+        description:
+          "Paid quick Base USDC/x402 review with JSON intake. Returns a 12h order receipt, proof requirements, and review instructions.",
+        mimeType: "application/json",
+        accepts: [x402Accept(QUICK_REVIEW_X402_PRICE)],
+      },
+      {
         url: `${baseUrl()}/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable`,
         method: "GET",
         description:
@@ -3338,6 +3583,48 @@ function openApiDocument() {
             },
           ],
           outputExample: bazaarOutputExample(weatherCurrentDiscoveryExtension()),
+        }),
+      },
+      "/api/x402/services/quick-review": {
+        get: paidOpenApiOperation({
+          operationId: "getPaidQuickReview",
+          summary: "Paid Base USDC/x402 quick review",
+          description:
+            "Accepts a paid quick-review intake for one Base USDC/x402 endpoint, marketplace listing, webhook, or payment challenge and returns an order receipt with 12h delivery instructions.",
+          price: QUICK_REVIEW_X402_PRICE,
+          parameters: integrationTriageOpenApiParameters(),
+          outputExample: bazaarOutputExample(
+            integrationTriageDiscoveryExtension({
+              service: "Base USDC x402 Quick Review",
+              price: QUICK_REVIEW_X402_PRICE,
+              sla: "12h from paid intake",
+              goal: "Verify the x402 payment challenge and identify the next patch.",
+            }),
+          ),
+        }),
+        post: paidOpenApiOperation({
+          operationId: "postPaidQuickReview",
+          summary: "Paid Base USDC/x402 quick review",
+          description:
+            "Accepts a paid JSON quick-review intake for one Base USDC/x402 endpoint, marketplace listing, webhook, or payment challenge and returns an order receipt with 12h delivery instructions.",
+          price: QUICK_REVIEW_X402_PRICE,
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: integrationTriageInputSchema(),
+              },
+            },
+          },
+          outputExample: bazaarOutputExample(
+            integrationTriageDiscoveryExtension({
+              method: "POST",
+              service: "Base USDC x402 Quick Review",
+              price: QUICK_REVIEW_X402_PRICE,
+              sla: "12h from paid intake",
+              goal: "Verify the x402 payment challenge and identify the next patch.",
+            }),
+          ),
         }),
       },
       "/api/x402/services/integration-triage": {
@@ -3515,6 +3802,8 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
 - GET ${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js
 - GET ${baseUrl()}/api/x402/weather/current?latitude=37.7749&longitude=-122.4194
+- GET ${baseUrl()}/api/x402/services/quick-review?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Verify%20the%20x402%20payment%20challenge%20and%20identify%20the%20next%20patch
+- POST ${baseUrl()}/api/x402/services/quick-review
 - GET ${baseUrl()}/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable
 - POST ${baseUrl()}/api/x402/services/integration-triage
 
@@ -3552,6 +3841,7 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - Daily crypto OHLCV feed: GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365 (${MARKET_OHLCV_X402_PRICE})
 - GitHub repo intelligence snapshot: GET ${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js (${DEV_REPO_SNAPSHOT_X402_PRICE})
 - Current weather snapshot: GET ${baseUrl()}/api/x402/weather/current?latitude=37.7749&longitude=-122.4194 (${WEATHER_CURRENT_X402_PRICE})
+- Quick x402 readback: POST ${baseUrl()}/api/x402/services/quick-review (${QUICK_REVIEW_X402_PRICE})
 - Fixed-price x402 integration triage: POST ${baseUrl()}/api/x402/services/integration-triage (${INTEGRATION_TRIAGE_X402_PRICE})
 
 Use the x402 manifest for exact payment requirements before calling paid endpoints.
@@ -3740,12 +4030,18 @@ function weatherCurrentDiscoveryExtension() {
   });
 }
 
-function integrationTriageDiscoveryExtension({ method = "GET" } = {}) {
+function integrationTriageDiscoveryExtension({
+  method = "GET",
+  service = "Base USDC x402 Integration Triage",
+  price = INTEGRATION_TRIAGE_X402_PRICE,
+  sla = "24h from paid intake",
+  goal = "Make the x402 Base USDC endpoint browser-agent readable and ready for marketplace listing.",
+} = {}) {
   return declareDiscoveryExtension({
     method,
     input: {
       repository_or_url: "https://github.com/example/project",
-      goal: "Make the x402 Base USDC endpoint browser-agent readable and ready for marketplace listing.",
+      goal,
       contact: "github:@buyer",
       constraints: "No production writes without approval.",
     },
@@ -3753,17 +4049,17 @@ function integrationTriageDiscoveryExtension({ method = "GET" } = {}) {
     output: {
       type: "json",
       example: {
-        service: "Base USDC x402 Integration Triage",
+        service,
         orderId: "triage-example",
         status: "paid_intake_received",
         payment: {
           asset: "native USDC",
           network: "Base",
-          expectedAmountUsd: 100,
+          expectedAmountUsd: priceUsd(price),
           payTo: PAY_TO,
         },
         deliverable: {
-          sla: "24h from paid intake",
+          sla,
           format: "findings, proof URLs, and a concrete patch or implementation plan",
         },
       },

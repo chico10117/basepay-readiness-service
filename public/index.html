@@ -36,6 +36,11 @@
 
         <section class="offers" aria-label="Fixed price services">
           <article class="starter-offer">
+            <div class="price">$50</div>
+            <h2>Quick x402 readback</h2>
+            <p>One endpoint or listing checked for payTo, amount, CORS, cache, and the next patch to make it buyer-readable.</p>
+          </article>
+          <article>
             <div class="price">$100</div>
             <h2>Same-day kickoff</h2>
             <p>One focused payment, VPS, wallet, or agent QA blocker scoped and started today. Counts as credit toward larger work.</p>
@@ -94,10 +99,14 @@
           <div class="stamp">How to order</div>
           <p class="side-copy">
             Open a work request with the target wallet, repo, domain, VPS, or
-            agent flow. A 100 USDC kickoff starts one scoped blocker today.
+            agent flow. A 50 USDC readback checks one blocker; 100 USDC starts
+            one scoped fix today.
           </p>
         </div>
 
+        <a class="order-link" href="/api/x402/services/quick-review?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&amp;goal=Verify%20the%20x402%20payment%20challenge%20and%20identify%20the%20next%20patch.&amp;contact=github%3A%40buyer&amp;constraints=No%20production%20writes%20without%20approval.">
+          Start $50 x402 readback
+        </a>
         <a class="order-link" href="/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&amp;goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable%20and%20ready%20for%20marketplace%20listing.&amp;contact=github%3A%40buyer&amp;constraints=No%20production%20writes%20without%20approval.">
           Start $100 x402 order
         </a>
@@ -110,8 +119,8 @@
 
         <div class="stats">
           <div>
-            <span>$100</span>
-            <small>kickoff option</small>
+            <span>$50</span>
+            <small>readback option</small>
           </div>
           <div>
             <span>24h</span>
