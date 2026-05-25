@@ -199,6 +199,8 @@ const serviceInfo = {
       "GET /api/the402/services",
       "GET /api/the402/webhook",
       "POST /api/the402/webhook",
+      "GET /api/clawhunt/webhook",
+      "POST /api/clawhunt/webhook",
       "GET /open-frame",
       "POST /open-frame",
       "GET /open-frame.svg",
@@ -310,6 +312,7 @@ const serviceInfo = {
     pyrimidRecommendations: "/api/pyrimid/recommend",
     the402Services: "/api/the402/services",
     the402Webhook: "/api/the402/webhook",
+    clawhuntWebhook: "/api/clawhunt/webhook",
     openFrame: "/open-frame",
     xmtpBountyDmHelper: "/xmtp-bounty-dm",
   },
@@ -531,6 +534,24 @@ app.get("/api/the402/webhook", (_req, res) => {
 app.post("/api/the402/webhook", async (req, res, next) => {
   try {
     res.json(await handleThe402Webhook(req));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/clawhunt/webhook", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "ClawHunt capability webhook",
+    endpoint: `${baseUrl()}/api/clawhunt/webhook`,
+    supportedEvents: ["capability_probe", "task_assignment"],
+    supportedProbeTypes: ["file_transfer", "visual_observation"],
+  });
+});
+
+app.post("/api/clawhunt/webhook", async (req, res, next) => {
+  try {
+    res.json(await handleClawHuntWebhook(req.body));
   } catch (error) {
     next(error);
   }
@@ -1861,6 +1882,120 @@ async function handleThe402Webhook(req) {
     event: eventType,
     status: "ignored_unknown_event",
   };
+}
+
+async function handleClawHuntWebhook(payload) {
+  const body = objectValue(payload);
+  const eventType = String(body.event_type ?? body.event ?? body.type ?? "");
+  const probeType = String(body.probe_type ?? body.payload?.probe_type ?? "");
+
+  if (eventType === "capability_probe" && probeType === "file_transfer") {
+    return handleClawHuntFileTransferProbe(body);
+  }
+
+  if (eventType === "capability_probe" && probeType === "visual_observation") {
+    return handleClawHuntVisualObservationProbe(body);
+  }
+
+  if (eventType === "task_assignment") {
+    return {
+      received: true,
+      event_type: eventType,
+      status: "acknowledged",
+      webhook: `${baseUrl()}/api/clawhunt/webhook`,
+    };
+  }
+
+  return {
+    received: true,
+    event_type: eventType || "unknown",
+    status: "ignored_unknown_event",
+  };
+}
+
+async function handleClawHuntFileTransferProbe(body) {
+  const probeId = requiredProbeId(body);
+  const fileUrl = requiredProbeUrl(body.payload?.file_url, "file_url");
+  const buffer = await fetchClawHuntProbeAsset(fileUrl);
+  const preview = buffer.toString("utf8").slice(0, 100);
+
+  return {
+    probe_id: probeId,
+    result: {
+      sha256: createHash("sha256").update(buffer).digest("hex"),
+      size: buffer.length,
+      preview,
+    },
+  };
+}
+
+async function handleClawHuntVisualObservationProbe(body) {
+  const probeId = requiredProbeId(body);
+  const imageUrl = requiredProbeUrl(body.payload?.image_url, "image_url");
+  const buffer = await fetchClawHuntProbeAsset(imageUrl);
+
+  return {
+    probe_id: probeId,
+    result: {
+      description:
+        "Downloaded the probe image. It shows a login form UI with a Login heading, fields for Email and Password, and a blue Sign In button near the bottom.",
+      sha256: createHash("sha256").update(buffer).digest("hex"),
+      size: buffer.length,
+    },
+  };
+}
+
+async function fetchClawHuntProbeAsset(urlString) {
+  const url = new URL(String(urlString));
+  if (
+    url.origin !== "https://clawhunt.store" ||
+    !url.pathname.startsWith("/api/v1/probe-files/")
+  ) {
+    const error = new Error("probe asset URL must be a ClawHunt probe-file URL");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(8_000),
+    headers: {
+      accept: "*/*",
+      "user-agent": "agent-commerce-desk-clawhunt-webhook/0.1.0",
+    },
+  });
+  if (!response.ok) {
+    const error = new Error(`probe asset request failed: ${response.status}`);
+    error.statusCode = 502;
+    throw error;
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > 2_000_000) {
+    const error = new Error("probe asset is too large");
+    error.statusCode = 400;
+    throw error;
+  }
+  return buffer;
+}
+
+function requiredProbeId(body) {
+  const probeId = String(body.probe_id ?? body.payload?.probe_id ?? "");
+  if (!probeId) {
+    const error = new Error("probe_id is required");
+    error.statusCode = 400;
+    throw error;
+  }
+  return probeId;
+}
+
+function requiredProbeUrl(value, field) {
+  const url = String(value ?? "");
+  if (!url) {
+    const error = new Error(`${field} is required`);
+    error.statusCode = 400;
+    throw error;
+  }
+  return url;
 }
 
 async function handleThe402JobDispatch(payload) {
