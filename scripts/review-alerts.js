@@ -14,6 +14,9 @@ try {
   if (Number(stats.failed_jobs || 0) >= failedAlertCount) {
     alerts.push(`${stats.failed_jobs} failed review job(s) require attention`);
   }
+  if (Number(stats.failed_deliveries || 0) >= failedAlertCount) {
+    alerts.push(`${stats.failed_deliveries} webhook delivery attempt(s) exhausted retries`);
+  }
   const payload = {
     event: alerts.length ? "review.alert" : "review.alerts_clear",
     observed_at: new Date().toISOString(),

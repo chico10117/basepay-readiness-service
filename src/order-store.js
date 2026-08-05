@@ -546,6 +546,7 @@ export async function getReviewQueueStats() {
       (SELECT COALESCE(jsonb_object_agg(status, count), '{}'::jsonb)
        FROM (SELECT status, COUNT(*)::INTEGER AS count FROM review_jobs GROUP BY status) counts) AS jobs,
       (SELECT COUNT(*)::INTEGER FROM delivery_attempts WHERE status IN ('pending', 'sending')) AS pending_deliveries,
+      (SELECT COUNT(*)::INTEGER FROM delivery_attempts WHERE status = 'failed') AS failed_deliveries,
       (SELECT MIN(created_at) FROM review_jobs WHERE status = 'queued') AS oldest_queued_at,
       (SELECT COUNT(*)::INTEGER FROM review_jobs WHERE status = 'failed') AS failed_jobs,
       (SELECT COUNT(*)::INTEGER FROM paid_service_orders WHERE settled_at IS NOT NULL) AS settled_orders
