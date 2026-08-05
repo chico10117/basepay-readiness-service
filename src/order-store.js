@@ -459,7 +459,12 @@ export async function failReviewJob({
           END,
           available_at = CASE
             WHEN $3 AND attempt_count < max_attempts
-              THEN NOW() + make_interval(secs => LEAST(attempt_count, 6) * 30)
+              THEN NOW() + make_interval(
+                secs => LEAST(
+                  1800,
+                  (30 * POWER(2, GREATEST(attempt_count - 1, 0)) + FLOOR(random() * 15))::INTEGER
+                )
+              )
             ELSE available_at
           END,
           lease_owner = NULL,
@@ -578,7 +583,12 @@ export async function markDeliveryFailed(deliveryId, error, retry = true, httpSt
       SET
         status = CASE WHEN $3 AND attempt_count < 6 THEN 'pending' ELSE 'failed' END,
         next_attempt_at = CASE
-          WHEN $3 AND attempt_count < 6 THEN NOW() + make_interval(secs => LEAST(attempt_count, 6) * 60)
+          WHEN $3 AND attempt_count < 6 THEN NOW() + make_interval(
+            secs => LEAST(
+              3600,
+              (60 * POWER(2, GREATEST(attempt_count - 1, 0)) + FLOOR(random() * 30))::INTEGER
+            )
+          )
           ELSE next_attempt_at
         END,
         last_http_status = COALESCE($4, last_http_status),
