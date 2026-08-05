@@ -399,42 +399,13 @@ export async function completeReviewJob({
   }
 
   return withTransaction(async client => {
-    await client.query(
-      `
-        INSERT INTO review_results (
-          result_id,
-          order_id,
-          schema_version,
-          verdict,
-          score,
-          result_json,
-          report_markdown,
-          target_snapshot,
-          agent_metadata
-        )
-        VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9::jsonb)
-        ON CONFLICT (order_id) DO UPDATE SET
-          schema_version = EXCLUDED.schema_version,
-          verdict = EXCLUDED.verdict,
-          score = EXCLUDED.score,
-          result_json = EXCLUDED.result_json,
-          report_markdown = EXCLUDED.report_markdown,
-          target_snapshot = EXCLUDED.target_snapshot,
-          agent_metadata = EXCLUDED.agent_metadata,
-          updated_at = NOW()
-      `,
-      [
-        crypto.randomUUID(),
-        orderId,
-        reviewResult.schema_version,
-        reviewResult.verdict,
-        reviewResult.score ?? null,
-        JSON.stringify(reviewResult),
-        reportMarkdown,
-        JSON.stringify(targetSnapshot ?? {}),
-        JSON.stringify(agentMetadata ?? {}),
-      ],
-    );
+    await insertReviewResult(client, {
+      orderId,
+      reviewResult,
+      reportMarkdown,
+      targetSnapshot,
+      agentMetadata,
+    });
 
     const jobResult = await client.query(
       `
@@ -456,23 +427,8 @@ export async function completeReviewJob({
       throw new Error("review job lease no longer belongs to this worker");
     }
 
-    if (status === "completed" || status === "needs_input") {
-      await client.query(
-        `
-          INSERT INTO delivery_attempts (
-            delivery_id, order_id, channel, destination, event_id, status, next_attempt_at
-          )
-          SELECT $1, o.order_id, 'webhook', o.callback_url, $2, 'pending', NOW()
-          FROM paid_service_orders o
-          WHERE o.order_id = $3 AND o.callback_url IS NOT NULL
-          ON CONFLICT (event_id) DO NOTHING
-        `,
-        [
-          crypto.randomUUID(),
-          `${orderId}:${status}`,
-          orderId,
-        ],
-      );
+    if (["completed", "needs_input"].includes(status)) {
+      await enqueueDelivery(client, orderId, status);
     }
 
     return { stored: true, status: jobResult.rows[0].status };
@@ -484,12 +440,16 @@ export async function failReviewJob({
   workerId,
   error,
   retry = true,
+  result: reviewResult = null,
+  reportMarkdown = "",
+  targetSnapshot = {},
+  agentMetadata = {},
 }) {
   const configured = await initializeOrderStore();
   if (!configured) return { stored: false };
 
   return withTransaction(async client => {
-    const result = await client.query(
+    const jobResult = await client.query(
       `
         UPDATE review_jobs
         SET
@@ -511,7 +471,18 @@ export async function failReviewJob({
       `,
       [jobId, String(error ?? "review failed"), Boolean(retry), workerId],
     );
-    return { stored: result.rowCount === 1, job: result.rows[0] ?? null };
+    const job = jobResult.rows[0] ?? null;
+    if (job?.status === "failed" && reviewResult) {
+      await insertReviewResult(client, {
+        orderId: job.order_id,
+        reviewResult,
+        reportMarkdown,
+        targetSnapshot,
+        agentMetadata,
+      });
+      await enqueueDelivery(client, job.order_id, "failed");
+    }
+    return { stored: jobResult.rowCount === 1, job };
   });
 }
 
@@ -597,7 +568,7 @@ export async function markDeliveryDelivered(deliveryId, httpStatus) {
   return result.rowCount === 1;
 }
 
-export async function markDeliveryFailed(deliveryId, error, retry = true) {
+export async function markDeliveryFailed(deliveryId, error, retry = true, httpStatus = null) {
   const configured = await initializeOrderStore();
   if (!configured) return false;
   const result = await pool.query(
@@ -609,14 +580,72 @@ export async function markDeliveryFailed(deliveryId, error, retry = true) {
           WHEN $3 AND attempt_count < 6 THEN NOW() + make_interval(secs => LEAST(attempt_count, 6) * 60)
           ELSE next_attempt_at
         END,
+        last_http_status = COALESCE($4, last_http_status),
         last_error = LEFT($2, 2000),
         updated_at = NOW()
       WHERE delivery_id = $1
       RETURNING delivery_id
     `,
-    [deliveryId, String(error ?? "delivery failed"), Boolean(retry)],
+    [deliveryId, String(error ?? "delivery failed"), Boolean(retry), httpStatus],
   );
   return result.rowCount === 1;
+}
+
+async function insertReviewResult(
+  client,
+  { orderId, reviewResult, reportMarkdown, targetSnapshot, agentMetadata },
+) {
+  await client.query(
+    `
+      INSERT INTO review_results (
+        result_id,
+        order_id,
+        schema_version,
+        verdict,
+        score,
+        result_json,
+        report_markdown,
+        target_snapshot,
+        agent_metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8::jsonb, $9::jsonb)
+      ON CONFLICT (order_id) DO UPDATE SET
+        schema_version = EXCLUDED.schema_version,
+        verdict = EXCLUDED.verdict,
+        score = EXCLUDED.score,
+        result_json = EXCLUDED.result_json,
+        report_markdown = EXCLUDED.report_markdown,
+        target_snapshot = EXCLUDED.target_snapshot,
+        agent_metadata = EXCLUDED.agent_metadata,
+        updated_at = NOW()
+    `,
+    [
+      crypto.randomUUID(),
+      orderId,
+      reviewResult.schema_version,
+      reviewResult.verdict,
+      reviewResult.score ?? null,
+      JSON.stringify(reviewResult),
+      reportMarkdown,
+      JSON.stringify(targetSnapshot ?? {}),
+      JSON.stringify(agentMetadata ?? {}),
+    ],
+  );
+}
+
+async function enqueueDelivery(client, orderId, status) {
+  await client.query(
+    `
+      INSERT INTO delivery_attempts (
+        delivery_id, order_id, channel, destination, event_id, status, next_attempt_at
+      )
+      SELECT $1, o.order_id, 'webhook', o.callback_url, $2, 'pending', NOW()
+      FROM paid_service_orders o
+      WHERE o.order_id = $3 AND o.callback_url IS NOT NULL
+      ON CONFLICT (event_id) DO NOTHING
+    `,
+    [crypto.randomUUID(), `${orderId}:${status}`, orderId],
+  );
 }
 
 export async function closeOrderStore() {

@@ -54,7 +54,11 @@ export async function sendWebhook(delivery) {
 
   if (!response.ok) {
     const text = await readResponseText(response, 2000).catch(() => "");
-    throw new Error(`webhook returned HTTP ${response.status}${text ? `: ${text.slice(0, 300)}` : ""}`);
+    const error = new Error(
+      `webhook returned HTTP ${response.status}${text ? `: ${text.slice(0, 300)}` : ""}`,
+    );
+    error.httpStatus = response.status;
+    throw error;
   }
   return { status: response.status, event };
 }

@@ -254,6 +254,7 @@ function normalizeModelResult(value, job, targetSnapshot) {
     ...value,
     schema_version: REVIEW_RESULT_SCHEMA_VERSION,
     order_id: job.order_id,
+    status: value.status || "completed",
     service: job.service,
     goal: job.goal,
     target_snapshot: targetSnapshot,

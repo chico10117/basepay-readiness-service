@@ -102,13 +102,22 @@ async function processJob(job, workerId) {
       console.log(JSON.stringify({ event: "review.needs_input", orderId: job.order_id }));
     } else {
       const retry = error.retryable !== false;
+      const failure = buildFailureResult(job, error);
       const outcome = await failReviewJob({
         jobId: job.job_id,
         workerId,
         error: error.message,
         retry,
+        result: failure.result,
+        reportMarkdown: renderReviewMarkdown(failure.result),
+        targetSnapshot: failure.targetSnapshot,
+        agentMetadata: failure.result.agent,
       });
-      logError(`review ${job.order_id} (${outcome.job?.status || "unknown"})`, error);
+      if (outcome.job?.status === "failed") {
+        console.log(JSON.stringify({ event: "review.failed", orderId: job.order_id }));
+      } else {
+        logError(`review ${job.order_id} (${outcome.job?.status || "unknown"})`, error);
+      }
     }
   } finally {
     clearInterval(heartbeat);
@@ -167,6 +176,51 @@ async function completeNeedsInput(job, workerId, error) {
   });
 }
 
+function buildFailureResult(job, error) {
+  const message = String(error?.message || "automated review failed").slice(0, 500);
+  const targetSnapshot = {
+    type: "review_failure",
+    retrieved_at: new Date().toISOString(),
+  };
+  return {
+    targetSnapshot,
+    result: buildReviewResult({
+      orderId: job.order_id,
+      service: job.service,
+      goal: job.goal,
+      status: "failed",
+      verdict: "inconclusive",
+      score: null,
+      summary: "The automated reviewer exhausted its retry policy before producing a valid review.",
+      checks: [
+        {
+          id: "review-execution",
+          status: "failed",
+          summary: message,
+        },
+      ],
+      findings: [
+        {
+          id: "F-001",
+          severity: "high",
+          title: "Automated review did not complete",
+          evidence: { observation: message },
+          impact: "No evidence-backed review could be delivered for this paid order.",
+          recommendation: "Inspect the worker error and retry the order after correcting the target or service configuration.",
+        },
+      ],
+      nextSteps: ["Inspect the worker error and resubmit the review after the blocker is corrected."],
+      limitations: ["The worker exhausted its configured retry policy."],
+      targetSnapshot,
+      agent: {
+        runner_version: "1.0.0",
+        provider: "worker",
+        model: "not-run",
+      },
+    }),
+  };
+}
+
 async function processDelivery(workerId) {
   const delivery = await claimNextDelivery(workerId);
   if (!delivery) return false;
@@ -176,7 +230,7 @@ async function processDelivery(workerId) {
     console.log(JSON.stringify({ event: "review.delivery_completed", orderId: delivery.order_id }));
   } catch (error) {
     const retry = !/private|localhost|metadata|HTTPS|credentials/i.test(error.message);
-    await markDeliveryFailed(delivery.delivery_id, error.message, retry);
+    await markDeliveryFailed(delivery.delivery_id, error.message, retry, error.httpStatus ?? null);
     logError(`delivery ${delivery.order_id}`, error);
   }
   return true;

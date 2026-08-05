@@ -3,6 +3,7 @@ export const REVIEW_RESULT_SCHEMA_VERSION = "x402-review-result/v1";
 const VERDICTS = new Set(["ready", "needs_changes", "blocked", "inconclusive"]);
 const SEVERITIES = new Set(["critical", "high", "medium", "low", "info"]);
 const CHECK_STATUSES = new Set(["passed", "failed", "needs_changes", "not_run", "blocked"]);
+const RESULT_STATUSES = new Set(["completed", "needs_input", "failed"]);
 
 export function validateReviewResult(result) {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
@@ -14,6 +15,9 @@ export function validateReviewResult(result) {
   }
   requireString(result.order_id, "order_id", 200);
   requireString(result.service, "service", 200);
+  requireString(result.status, "status", 50);
+  if (!RESULT_STATUSES.has(result.status)) throw new Error(`invalid review result status: ${result.status}`);
+  requireString(result.goal, "goal", 4000);
   if (!VERDICTS.has(result.verdict)) throw new Error("invalid review verdict");
   requireString(result.summary, "summary", 4000);
   if (result.score !== null && result.score !== undefined &&

@@ -27,7 +27,7 @@ test(
         request: {
           repository_or_url: "vercel/next.js",
           goal: "Review x402",
-          callback_url: null,
+          callback_url: "https://buyer.example/callback",
           response_format: "both",
           language: "en",
         },
@@ -79,6 +79,23 @@ test(
         reportMarkdown: "# Test result",
         targetSnapshot: { type: "test" },
         agentMetadata: { provider: "test" },
+      });
+      const delivery = await store.claimNextDelivery("integration-test");
+      assert.equal(delivery.order_id, orderId);
+      await store.markDeliveryFailed(
+        delivery.delivery_id,
+        "webhook returned HTTP 500",
+        true,
+        500,
+      );
+      const deliveryState = await pool.query(
+        "SELECT status, attempt_count, last_http_status FROM delivery_attempts WHERE order_id = $1",
+        [orderId],
+      );
+      assert.deepEqual(deliveryState.rows[0], {
+        status: "pending",
+        attempt_count: 1,
+        last_http_status: 500,
       });
       const saved = await store.getReviewOrder(orderId, accessToken);
       assert.equal(saved.review.status, "completed");

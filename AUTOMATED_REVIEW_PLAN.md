@@ -1,6 +1,7 @@
 # Plan de revisión automática y entrega x402
 
-Estado: listo para implementación
+Estado: implementado y desplegado; pendiente únicamente el pago real controlado
+Última verificación operativa: 2026-08-05
 Repositorio: `x402-wallet-readiness-service`
 Alcance inicial: `Quick Review` e `Integration Triage`
 
@@ -32,15 +33,21 @@ Ya existe:
 - PostgreSQL privado en el VPS y backups diarios.
 - Vercel como proxy HTTPS hacia el servicio Node del VPS.
 
-Falta:
+Implementado en el MVP desplegado:
 
-- Cola de revisiones.
-- Worker automático.
-- Motor de revisión con herramientas limitadas.
-- Persistencia del informe final.
-- API autenticada de estado y resultado.
-- Webhooks de finalización y reintentos.
-- Métricas y alertas operativas.
+- Cola durable PostgreSQL con leases, reintentos y recuperación.
+- Worker automático aislado mediante systemd, con concurrencia `1`.
+- Inspección de repositorios GitHub públicos y endpoints HTTPS con límites y
+  defensa SSRF.
+- Resultado canónico validado, persistido en JSON y renderizado en Markdown.
+- API autenticada de estado, resultado y reporte.
+- Webhooks firmados, idempotentes y con reintentos.
+- Métricas, alertas, backup y runbook operativo en el VPS.
+
+Pendiente fuera de la automatización verificable desde este entorno:
+
+- Firmar un pago x402 real con una wallet pagadora controlada y completar el
+  flujo end-to-end en producción.
 
 ## 3. Decisiones para el MVP
 
