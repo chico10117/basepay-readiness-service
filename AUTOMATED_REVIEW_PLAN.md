@@ -331,7 +331,8 @@ archivos, líneas, respuestas HTTP, comandos ejecutados ni resultados de tests.
 ### Preparación
 
 1. Reclamar un job mediante lease transaccional.
-2. Crear un directorio temporal único.
+2. Preparar un contexto de inspección acotado; el MVP no persiste workspaces del
+   target.
 3. Clasificar el target: GitHub repo, documentación o endpoint HTTPS.
 4. Resolver DNS y aplicar las restricciones SSRF antes de cada conexión.
 5. Capturar el snapshot inicial.
@@ -340,13 +341,14 @@ archivos, líneas, respuestas HTTP, comandos ejecutados ni resultados de tests.
 
 Para repositorios:
 
-- Clonar por HTTPS con profundidad limitada.
+- Obtener un snapshot público mediante la API REST de GitHub; esto reemplaza el
+  clone shallow en el MVP y evita ejecutar hooks, submódulos o scripts del target.
 - Registrar commit SHA.
 - Limitar tamaño, cantidad de archivos y archivos individuales.
 - Detectar stack y entrypoints.
 - Buscar configuración x402, rutas pagadas, payTo, network y facilitator.
 - Revisar tests y documentación relacionados.
-- No ejecutar hooks de Git.
+- No ejecutar hooks de Git ni scripts del repositorio.
 
 Para endpoints:
 
@@ -497,7 +499,6 @@ los módulos nuevos y mantener el cambio inicial acotado.
 
 - [x] Añadir migraciones versionadas.
 - [x] Crear tablas, índices y constraints.
-- [x] Generar y almacenar hash con pepper del token de acceso.
 - [x] Crear job `awaiting_settlement` al guardar el intake.
 - [x] Encolar transaccionalmente después del settlement.
 - [x] Cancelar job ante fallo de settlement.

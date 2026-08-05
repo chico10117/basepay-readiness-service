@@ -22,6 +22,7 @@ export async function runReviewAgent({ job, evidence, targetSnapshot }) {
     result = deterministicReview({ job, evidence, targetSnapshot });
   }
 
+  result = enforceServiceLimits(result, job);
   validateReviewResult(result);
   validateEvidenceReferences(result, evidence);
   return {
@@ -80,7 +81,7 @@ function deterministicReview({ job, evidence, targetSnapshot }) {
     score,
     summary,
     checks,
-    findings: findings.slice(0, 20),
+    findings: findings.slice(0, maxFindingsFor(job)),
     nextSteps: nextStepsFor(findings, job),
     limitations: [
       "This automated MVP performs read-only inspection and non-payment probes.",
@@ -327,6 +328,18 @@ function nextStepsFor(findings, job) {
     "Address the highest-severity findings first.",
     `Re-run ${job.service} after the target changes and compare the new evidence snapshot.`,
   ];
+}
+
+function maxFindingsFor(job) {
+  return job.service.includes("Integration") ? 10 : 5;
+}
+
+function enforceServiceLimits(result, job) {
+  if (!Array.isArray(result?.findings)) return result;
+  return {
+    ...result,
+    findings: result.findings.slice(0, maxFindingsFor(job)),
+  };
 }
 
 function validateEvidenceReferences(result, evidence) {

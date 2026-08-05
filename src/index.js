@@ -2538,7 +2538,7 @@ function parseIntegrationTriageRequest(query) {
     throw error;
   }
 
-  return {
+  const request = {
     repository_or_url: requiredQueryString(
       query.repository_or_url,
       "repository_or_url",
@@ -2551,6 +2551,24 @@ function parseIntegrationTriageRequest(query) {
     response_format: responseFormat,
     language,
   };
+  for (const [field, value] of Object.entries(request)) {
+    rejectSensitiveIntakeValue(field, value);
+  }
+  return request;
+}
+
+function rejectSensitiveIntakeValue(field, value) {
+  const text = String(value ?? "");
+  const looksSensitive =
+    /-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(text) ||
+    /\b(?:sk|pk|ghp|gho|github_pat|xox[baprs]-)[A-Za-z0-9_-]{16,}\b/i.test(text) ||
+    /\b(?:api[-_ ]?key|authorization|cookie|private[-_ ]?key|seed phrase|mnemonic|password)\s*[:=]\s*\S+/i.test(text) ||
+    /\b0x[a-f0-9]{64}\b/i.test(text) ||
+    (field === "repository_or_url" && /^[a-z][a-z0-9+.-]*:\/\/[^/]*@/i.test(text));
+  if (!looksSensitive) return;
+  const error = new Error(`${field} must not contain private keys, credentials, or access tokens`);
+  error.statusCode = 400;
+  throw error;
 }
 
 async function buildAndStoreServiceOrder(req, builder) {
