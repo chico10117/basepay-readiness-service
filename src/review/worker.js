@@ -37,6 +37,7 @@ export async function runReviewWorker({ once = false } = {}) {
     return;
   }
 
+  validateWorkerConfiguration();
   await initializeOrderStore();
   const workerId = `${process.env.HOSTNAME || "x402-worker"}-${crypto.randomUUID().slice(0, 8)}`;
   let stopping = false;
@@ -254,4 +255,19 @@ function withTimeout(promise, timeoutMs) {
     }, timeoutMs);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function validateWorkerConfiguration() {
+  if (!String(process.env.WEBHOOK_SIGNING_KEY ?? "").trim()) {
+    throw new Error("WEBHOOK_SIGNING_KEY is required for the review worker");
+  }
+  const provider = String(process.env.REVIEW_AGENT_PROVIDER ?? "deterministic").trim().toLowerCase();
+  if (["openai", "openai-compatible"].includes(provider)) {
+    if (!String(process.env.REVIEW_AGENT_API_URL ?? "").trim()) {
+      throw new Error("REVIEW_AGENT_API_URL is required for the configured review agent");
+    }
+    if (!String(process.env.REVIEW_AGENT_API_KEY ?? "").trim()) {
+      throw new Error("REVIEW_AGENT_API_KEY is required for the configured review agent");
+    }
+  }
 }

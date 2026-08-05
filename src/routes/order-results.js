@@ -1,8 +1,13 @@
 import express from "express";
 import { getReviewOrder } from "../order-store.js";
 
+const RATE_WINDOW_MS = 60_000;
+const RATE_LIMIT = 60;
+const rateBuckets = new Map();
+
 export function createOrderResultsRouter() {
   const router = express.Router();
+  router.use(rateLimitResultRequests);
 
   router.get("/api/x402/orders/:orderId", async (req, res, next) => {
     try {
@@ -52,6 +57,29 @@ export function createOrderResultsRouter() {
   });
 
   return router;
+}
+
+function rateLimitResultRequests(req, res, next) {
+  const now = Date.now();
+  const key = req.ip || req.socket.remoteAddress || "unknown";
+  const current = rateBuckets.get(key);
+  if (!current || now - current.startedAt >= RATE_WINDOW_MS) {
+    rateBuckets.set(key, { startedAt: now, count: 1 });
+    pruneRateBuckets(now);
+    return next();
+  }
+  current.count += 1;
+  if (current.count > RATE_LIMIT) {
+    res.set("Retry-After", String(Math.ceil((RATE_WINDOW_MS - (now - current.startedAt)) / 1000)));
+    return res.status(429).json({ error: "too many result requests" });
+  }
+  return next();
+}
+
+function pruneRateBuckets(now) {
+  for (const [key, bucket] of rateBuckets) {
+    if (now - bucket.startedAt >= RATE_WINDOW_MS) rateBuckets.delete(key);
+  }
 }
 
 async function authenticatedOrder(req) {
