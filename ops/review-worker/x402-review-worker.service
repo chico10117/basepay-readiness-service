@@ -1,0 +1,31 @@
+[Unit]
+Description=x402 automated review worker
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=x402review
+Group=x402review
+WorkingDirectory=/opt/x402-wallet-readiness
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/x402-wallet-readiness/review-worker.env
+ExecStart=/usr/bin/node /opt/x402-wallet-readiness/scripts/run-review-worker.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+MemoryMax=512M
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,11 @@
 import express from "express";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { facilitator as coinbaseFacilitator } from "@coinbase/x402";
@@ -11,11 +17,14 @@ import { paymentMiddleware } from "@x402/express";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import {
   initializeOrderStore,
+  hashAccessToken,
   markOrderSettled,
   markOrderSettlementFailed,
   orderStoreConfigured,
   saveVerifiedOrder,
 } from "./order-store.js";
+import { createOrderResultsRouter } from "./routes/order-results.js";
+import { validateCallbackUrl } from "./review/delivery.js";
 
 const PAY_TO =
   process.env.PAY_TO ?? "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9";
@@ -171,10 +180,11 @@ app.use(
     },
   }),
 );
+app.use(createOrderResultsRouter());
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.11.9",
+  version: "0.12.0",
   description:
     "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -242,6 +252,9 @@ const serviceInfo = {
       "POST /api/x402/services/quick-review",
       "GET /api/x402/services/integration-triage?repository_or_url=...&goal=...",
       "POST /api/x402/services/integration-triage",
+      "GET /api/x402/orders/:orderId (bearer token)",
+      "GET /api/x402/orders/:orderId/result (bearer token)",
+      "GET /api/x402/orders/:orderId/report.md (bearer token)",
     ],
   },
   input: {
@@ -2515,6 +2528,16 @@ function validatePaidServiceIntake(req, res, next) {
 }
 
 function parseIntegrationTriageRequest(query) {
+  const callbackUrl = optionalQueryString(query.callback_url, 2000);
+  const responseFormat = optionalQueryString(query.response_format, 20) || "both";
+  const language = optionalQueryString(query.language, 20) || "en";
+  if (callbackUrl) validateCallbackUrl(callbackUrl);
+  if (!["json", "markdown", "both"].includes(responseFormat)) {
+    const error = new Error("response_format must be json, markdown, or both");
+    error.statusCode = 400;
+    throw error;
+  }
+
   return {
     repository_or_url: requiredQueryString(
       query.repository_or_url,
@@ -2524,6 +2547,9 @@ function parseIntegrationTriageRequest(query) {
     goal: requiredQueryString(query.goal, "goal", 800),
     contact: optionalQueryString(query.contact, 300),
     constraints: optionalQueryString(query.constraints, 1000),
+    callback_url: callbackUrl,
+    response_format: responseFormat,
+    language,
   };
 }
 
@@ -2539,6 +2565,18 @@ async function buildAndStoreServiceOrder(req, builder) {
     .update(paymentHeader)
     .digest("hex");
   const receipt = builder(integrationTriageParams(req), paymentFingerprint);
+  const accessToken = randomBytes(32).toString("base64url");
+  const accessTokenHash = hashAccessToken(accessToken);
+  const jobId = randomUUID();
+  const estimatedCompletionMinutes = receipt.service.includes("Integration") ? 30 : 15;
+  receipt.review = {
+    status: "awaiting_settlement",
+    statusUrl: `${baseUrl()}/api/x402/orders/${encodeURIComponent(receipt.orderId)}`,
+    resultUrl: `${baseUrl()}/api/x402/orders/${encodeURIComponent(receipt.orderId)}/result`,
+    reportUrl: `${baseUrl()}/api/x402/orders/${encodeURIComponent(receipt.orderId)}/report.md`,
+    estimatedCompletionMinutes,
+    accessToken,
+  };
   receipt.persistence = {
     status: orderStoreConfigured()
       ? "durable_intake_record_created"
@@ -2555,6 +2593,8 @@ async function buildAndStoreServiceOrder(req, builder) {
       requestMethod: req.method,
       requestPath: req.path,
       paymentFingerprint,
+      accessTokenHash,
+      jobId,
       payment: receipt.payment,
       receipt,
     });
@@ -4094,6 +4134,27 @@ function integrationTriageOpenApiParameters() {
       schema: { type: "string", maxLength: 1000 },
       description: "Deployment, wallet, security, or deadline constraints.",
     },
+    {
+      name: "callback_url",
+      in: "query",
+      required: false,
+      schema: { type: "string", format: "uri", maxLength: 2000 },
+      description: "HTTPS webhook URL for completion notifications.",
+    },
+    {
+      name: "response_format",
+      in: "query",
+      required: false,
+      schema: { type: "string", enum: ["json", "markdown", "both"], default: "both" },
+      description: "Preferred result format.",
+    },
+    {
+      name: "language",
+      in: "query",
+      required: false,
+      schema: { type: "string", maxLength: 20, default: "en" },
+      description: "Preferred report language.",
+    },
   ];
 }
 
@@ -4146,6 +4207,9 @@ Facilitator: ${ACTIVE_FACILITATOR_URL}
 - POST ${baseUrl()}/api/x402/services/quick-review
 - GET ${baseUrl()}/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable
 - POST ${baseUrl()}/api/x402/services/integration-triage
+- GET ${baseUrl()}/api/x402/orders/<order-id> (Authorization: Bearer <access-token>)
+- GET ${baseUrl()}/api/x402/orders/<order-id>/result (Authorization: Bearer <access-token>)
+- GET ${baseUrl()}/api/x402/orders/<order-id>/report.md (Authorization: Bearer <access-token>)
 
 ## the402 provider webhook
 
@@ -4384,6 +4448,9 @@ function integrationTriageDiscoveryExtension({
       goal,
       contact: "github:@buyer",
       constraints: "No production writes without approval.",
+      callback_url: "https://buyer.example/x402/callback",
+      response_format: "both",
+      language: "en",
     },
     inputSchema: integrationTriageInputSchema(),
     output: {
@@ -4401,6 +4468,12 @@ function integrationTriageDiscoveryExtension({
         deliverable: {
           sla,
           format: "findings, proof URLs, and a concrete patch or implementation plan",
+        },
+        review: {
+          status: "awaiting_settlement",
+          statusUrl: "https://x402-wallet-readiness-service.vercel.app/api/x402/orders/triage-example",
+          resultUrl: "https://x402-wallet-readiness-service.vercel.app/api/x402/orders/triage-example/result",
+          estimatedCompletionMinutes: service.includes("Integration") ? 30 : 15,
         },
       },
     },
@@ -4467,6 +4540,24 @@ function integrationTriageInputSchema() {
         type: "string",
         maxLength: 1000,
         description: "Deployment, wallet, security, or deadline constraints.",
+      },
+      callback_url: {
+        type: "string",
+        format: "uri",
+        maxLength: 2000,
+        description: "HTTPS webhook URL for completion notifications.",
+      },
+      response_format: {
+        type: "string",
+        enum: ["json", "markdown", "both"],
+        default: "both",
+        description: "Preferred result format.",
+      },
+      language: {
+        type: "string",
+        maxLength: 20,
+        default: "en",
+        description: "Preferred report language.",
       },
     },
     additionalProperties: false,

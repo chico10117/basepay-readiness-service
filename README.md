@@ -137,6 +137,13 @@ x402 settlement, the resource-server hook records the payer and transaction
 hash. Retries are deduplicated with a SHA-256 fingerprint of the payment
 authorization; the authorization itself is never stored.
 
+Successful settlements now create a durable automated-review job. The VPS
+worker performs read-only inspection of public GitHub repositories or HTTPS
+endpoints, stores a versioned JSON result plus Markdown report, and optionally
+sends a signed webhook to the buyer's `callback_url`. The receipt includes a
+private bearer token and status/result URLs; the token is returned once and its
+hash is stored, never the token itself.
+
 Production runs PostgreSQL privately on the VPS loopback interface. Vercel
 continues to be the public HTTPS entrypoint and forwards requests to the VPS;
 the database is never exposed to Vercel or the public Internet.
@@ -155,6 +162,27 @@ docker exec x402-orders-postgres \
   psql -U x402_orders -d x402_orders \
   -c "SELECT order_id, service, status, repository_or_url, goal, settlement_tx_hash, created_at FROM paid_service_orders ORDER BY created_at DESC LIMIT 20;"
 ```
+
+The automated worker is configured with `/etc/x402-wallet-readiness/review-worker.env`
+and runs as `x402review` through `x402-review-worker.service`. The default
+`REVIEW_AGENT_PROVIDER=deterministic` performs evidence-based x402 checks
+without executing repository scripts. An OpenAI-compatible adapter can be
+enabled later by setting `REVIEW_AGENT_PROVIDER`, `REVIEW_AGENT_API_URL`, and
+`REVIEW_AGENT_API_KEY` on the VPS; those values must never be committed.
+
+After a paid receipt, use its bearer token with:
+
+```sh
+curl -H "Authorization: Bearer <access-token>" \
+  https://x402-wallet-readiness-service.vercel.app/api/x402/orders/<order-id>
+curl -H "Authorization: Bearer <access-token>" \
+  https://x402-wallet-readiness-service.vercel.app/api/x402/orders/<order-id>/result
+curl -H "Authorization: Bearer <access-token>" \
+  https://x402-wallet-readiness-service.vercel.app/api/x402/orders/<order-id>/report.md
+```
+
+The worker never accepts private keys, cookies, or GitHub tokens in a review
+request; private repositories require a future read-only GitHub App flow.
 
 The public root page and Open Frame point buyers directly at the sample
 `100 USDC` integration-triage order URL. GitHub issue context remains a
