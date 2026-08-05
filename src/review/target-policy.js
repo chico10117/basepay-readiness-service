@@ -49,8 +49,7 @@ export function normalizeReviewTarget(input) {
 }
 
 export async function assertPublicUrl(value) {
-  const url = value instanceof URL ? value : new URL(String(value));
-  validateUrlShape(url);
+  const url = assertUrlNotObviouslyPrivate(value);
 
   const hostname = url.hostname.toLowerCase();
   if (net.isIP(hostname)) {
@@ -75,6 +74,16 @@ export async function assertPublicUrl(value) {
     throw new TargetAccessError("target resolves to a private, loopback, or link-local address");
   }
 
+  return url;
+}
+
+export function assertUrlNotObviouslyPrivate(value) {
+  const url = value instanceof URL ? value : new URL(String(value));
+  validateUrlShape(url);
+  const hostname = url.hostname.toLowerCase();
+  if ((net.isIP(hostname) && isPrivateAddress(hostname)) || isBlockedHostname(hostname)) {
+    throw new TargetAccessError("private, loopback, or metadata targets are not allowed");
+  }
   return url;
 }
 

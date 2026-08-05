@@ -26,6 +26,7 @@ test("normalizes public GitHub targets and callback URLs", () => {
     "https://buyer.example/callback",
   );
   assert.throws(() => validateCallbackUrl("http://buyer.example/callback"), /HTTPS/);
+  assert.throws(() => validateCallbackUrl("https://127.0.0.1/callback"), /private|loopback/i);
 });
 
 test("blocks private target addresses before any request", async () => {

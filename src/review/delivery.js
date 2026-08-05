@@ -1,5 +1,10 @@
 import crypto from "node:crypto";
-import { assertPublicUrl, safeFetch, readResponseText } from "./target-policy.js";
+import {
+  assertPublicUrl,
+  assertUrlNotObviouslyPrivate,
+  safeFetch,
+  readResponseText,
+} from "./target-policy.js";
 
 const WEBHOOK_SIGNING_KEY = String(process.env.WEBHOOK_SIGNING_KEY ?? "").trim();
 
@@ -13,6 +18,11 @@ export function validateCallbackUrl(value) {
   }
   if (url.protocol !== "https:") throw new Error("callback_url must use HTTPS");
   if (url.username || url.password) throw new Error("callback_url must not contain credentials");
+  try {
+    assertUrlNotObviouslyPrivate(url);
+  } catch (error) {
+    throw new Error(`callback_url is not allowed: ${error.message}`);
+  }
   return url.toString();
 }
 

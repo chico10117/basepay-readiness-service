@@ -25,6 +25,7 @@ import {
 } from "./order-store.js";
 import { createOrderResultsRouter } from "./routes/order-results.js";
 import { validateCallbackUrl } from "./review/delivery.js";
+import { assertPublicUrl } from "./review/target-policy.js";
 
 const PAY_TO =
   process.env.PAY_TO ?? "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9";
@@ -2507,19 +2508,15 @@ function integrationTriageParams(req) {
   return req.query;
 }
 
-function validatePaidServiceIntake(req, res, next) {
+async function validatePaidServiceIntake(req, res, next) {
   if (req.method === "OPTIONS") {
     next();
     return;
   }
 
-  if (req.method === "POST" && !hasPaymentAttemptHeader(req)) {
-    next();
-    return;
-  }
-
   try {
-    parseIntegrationTriageRequest(integrationTriageParams(req));
+    const request = parseIntegrationTriageRequest(integrationTriageParams(req));
+    if (request.callback_url) await assertPublicUrl(request.callback_url);
     next();
   } catch (error) {
     attachPaidRouteBrowserHeaders(req, res);
