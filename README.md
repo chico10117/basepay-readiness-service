@@ -142,7 +142,11 @@ worker performs read-only inspection of public GitHub repositories or HTTPS
 endpoints, stores a versioned JSON result plus Markdown report, and optionally
 sends a signed webhook to the buyer's `callback_url`. The receipt includes a
 private bearer token and status/result URLs; the token is returned once and its
-hash is stored, never the token itself.
+hash is stored, never the token itself. Callback URLs must be public HTTPS
+endpoints; private, loopback, metadata, and credential-bearing URLs are rejected
+before payment and rechecked before delivery. Webhook keys are derived per
+order from the VPS-only signing key, and failed deliveries are retried and
+reported by the alert timer.
 
 Production runs PostgreSQL privately on the VPS loopback interface. Vercel
 continues to be the public HTTPS entrypoint and forwards requests to the VPS;
@@ -168,7 +172,10 @@ and runs as `x402review` through `x402-review-worker.service`. The default
 `REVIEW_AGENT_PROVIDER=deterministic` performs evidence-based x402 checks
 without executing repository scripts. An OpenAI-compatible adapter can be
 enabled later by setting `REVIEW_AGENT_PROVIDER`, `REVIEW_AGENT_API_URL`, and
-`REVIEW_AGENT_API_KEY` on the VPS; those values must never be committed.
+`REVIEW_AGENT_API_KEY` on the VPS; those values must never be committed. When
+the adapter returns usage metadata, the worker records token usage and an
+estimated cost using `REVIEW_AGENT_COST_PER_1K_TOKENS_USD`, enforcing the
+configured per-service budget.
 
 After a paid receipt, use its bearer token with:
 
