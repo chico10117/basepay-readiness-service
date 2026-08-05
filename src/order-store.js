@@ -554,7 +554,21 @@ export async function getReviewQueueStats() {
       (SELECT COUNT(*)::INTEGER FROM delivery_attempts WHERE status = 'failed') AS failed_deliveries,
       (SELECT MIN(created_at) FROM review_jobs WHERE status = 'queued') AS oldest_queued_at,
       (SELECT COUNT(*)::INTEGER FROM review_jobs WHERE status = 'failed') AS failed_jobs,
-      (SELECT COUNT(*)::INTEGER FROM paid_service_orders WHERE settled_at IS NOT NULL) AS settled_orders
+      (SELECT COUNT(*)::INTEGER FROM paid_service_orders WHERE settled_at IS NOT NULL) AS settled_orders,
+      (SELECT COALESCE(SUM((agent_metadata->'usage'->>'total_tokens')::NUMERIC), 0) FROM review_results) AS agent_tokens,
+      (SELECT COALESCE(SUM((agent_metadata->>'estimated_cost_usd')::NUMERIC), 0) FROM review_results) AS estimated_cost_usd,
+      (SELECT COALESCE(AVG((agent_metadata->>'duration_seconds')::NUMERIC), 0) FROM review_results) AS average_duration_seconds,
+      (SELECT COALESCE(jsonb_object_agg(severity, finding_count), '{}'::jsonb)
+       FROM (
+         SELECT finding->>'severity' AS severity, COUNT(*)::INTEGER AS finding_count
+         FROM review_results r
+         CROSS JOIN LATERAL jsonb_array_elements(
+           CASE WHEN jsonb_typeof(r.result_json->'findings') = 'array'
+             THEN r.result_json->'findings' ELSE '[]'::jsonb END
+         ) finding
+         WHERE finding->>'severity' IS NOT NULL
+         GROUP BY finding->>'severity'
+       ) finding_counts) AS findings_by_severity
   `);
   return { configured: true, ...result.rows[0] };
 }

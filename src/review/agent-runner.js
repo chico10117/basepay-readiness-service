@@ -14,9 +14,12 @@ export async function runReviewAgent({ job, evidence, targetSnapshot }) {
   const started = Date.now();
   let result;
   let provider = PROVIDER;
+  let usage = null;
 
   if (PROVIDER === "openai-compatible" || PROVIDER === "openai") {
-    result = await runCompatibleModel({ job, evidence, targetSnapshot });
+    const modelRun = await runCompatibleModel({ job, evidence, targetSnapshot });
+    result = modelRun.result;
+    usage = modelRun.usage;
   } else {
     provider = "deterministic";
     result = deterministicReview({ job, evidence, targetSnapshot });
@@ -25,6 +28,17 @@ export async function runReviewAgent({ job, evidence, targetSnapshot }) {
   result = enforceServiceLimits(result, job);
   validateReviewResult(result);
   validateEvidenceReferences(result, evidence);
+  const costBudgetUsd = job.service.includes("Integration")
+    ? Number(process.env.TRIAGE_MAX_COST_USD ?? "10")
+    : Number(process.env.QUICK_REVIEW_MAX_COST_USD ?? "3");
+  const estimatedCostUsd = estimateCostUsd(usage);
+  if (estimatedCostUsd > costBudgetUsd) {
+    const error = new Error(
+      `review agent estimated cost $${estimatedCostUsd.toFixed(4)} exceeds the $${costBudgetUsd.toFixed(2)} service budget`,
+    );
+    error.retryable = false;
+    throw error;
+  }
   return {
     result,
     metadata: {
@@ -32,9 +46,9 @@ export async function runReviewAgent({ job, evidence, targetSnapshot }) {
       provider,
       model: MODEL,
       output_token_limit: MAX_OUTPUT_TOKENS,
-      cost_budget_usd: job.service.includes("Integration")
-        ? Number(process.env.TRIAGE_MAX_COST_USD ?? "10")
-        : Number(process.env.QUICK_REVIEW_MAX_COST_USD ?? "3"),
+      usage,
+      estimated_cost_usd: estimatedCostUsd,
+      cost_budget_usd: costBudgetUsd,
       duration_seconds: Math.round((Date.now() - started) / 1000),
     },
   };
@@ -220,9 +234,14 @@ async function runCompatibleModel({ job, evidence, targetSnapshot }) {
     { role: "system", content: MODEL_SYSTEM_PROMPT },
     { role: "user", content: JSON.stringify(request).slice(0, 220_000) },
   ];
-  const firstContent = await requestCompatibleModel(endpoint, apiKey, messages);
+  const firstResponse = await requestCompatibleModel(endpoint, apiKey, messages);
+  const firstContent = firstResponse.content;
+  let usage = normalizeUsage(firstResponse.usage);
   try {
-    return normalizeModelResult(JSON.parse(stripJsonFence(firstContent)), job, targetSnapshot, evidence);
+    return {
+      result: normalizeModelResult(JSON.parse(stripJsonFence(firstContent)), job, targetSnapshot, evidence),
+      usage,
+    };
   } catch (firstError) {
     const repairMessages = [
       { role: "system", content: MODEL_SYSTEM_PROMPT },
@@ -239,8 +258,12 @@ async function runCompatibleModel({ job, evidence, targetSnapshot }) {
       },
     ];
     try {
-      const repairedContent = await requestCompatibleModel(endpoint, apiKey, repairMessages);
-      return normalizeModelResult(JSON.parse(stripJsonFence(repairedContent)), job, targetSnapshot, evidence);
+      const repairedResponse = await requestCompatibleModel(endpoint, apiKey, repairMessages);
+      usage = mergeUsage(usage, normalizeUsage(repairedResponse.usage));
+      return {
+        result: normalizeModelResult(JSON.parse(stripJsonFence(repairedResponse.content)), job, targetSnapshot, evidence),
+        usage,
+      };
     } catch (repairError) {
       const error = new Error(
         `review agent output was invalid after one repair: ${repairError.message}`,
@@ -276,7 +299,10 @@ async function requestCompatibleModel(endpoint, apiKey, messages) {
     const body = await response.text();
     if (!response.ok) throw new Error(`review agent returned HTTP ${response.status}`);
     const payload = JSON.parse(body);
-    return extractModelContent(payload);
+    return {
+      content: extractModelContent(payload),
+      usage: payload.usage || null,
+    };
   } finally {
     clearTimeout(timeout);
   }
@@ -369,4 +395,34 @@ function validateEvidenceReferences(result, evidence) {
       throw new Error(`finding ${finding.id} references a URL outside the evidence snapshot`);
     }
   }
+}
+
+function normalizeUsage(value) {
+  if (!value || typeof value !== "object") return null;
+  const promptTokens = Number(value.prompt_tokens ?? value.input_tokens ?? 0);
+  const completionTokens = Number(value.completion_tokens ?? value.output_tokens ?? 0);
+  const totalTokens = Number(value.total_tokens ?? promptTokens + completionTokens);
+  if (![promptTokens, completionTokens, totalTokens].every(Number.isFinite)) return null;
+  return {
+    prompt_tokens: Math.max(0, Math.round(promptTokens)),
+    completion_tokens: Math.max(0, Math.round(completionTokens)),
+    total_tokens: Math.max(0, Math.round(totalTokens)),
+  };
+}
+
+function mergeUsage(left, right) {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    prompt_tokens: left.prompt_tokens + right.prompt_tokens,
+    completion_tokens: left.completion_tokens + right.completion_tokens,
+    total_tokens: left.total_tokens + right.total_tokens,
+  };
+}
+
+function estimateCostUsd(usage) {
+  if (!usage) return 0;
+  const rate = Number(process.env.REVIEW_AGENT_COST_PER_1K_TOKENS_USD ?? "0");
+  if (!Number.isFinite(rate) || rate < 0) return 0;
+  return Number(((usage.total_tokens / 1000) * rate).toFixed(6));
 }
