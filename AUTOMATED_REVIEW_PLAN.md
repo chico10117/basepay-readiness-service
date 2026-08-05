@@ -48,6 +48,9 @@ Pendiente fuera de la automatización verificable desde este entorno:
 
 - Firmar un pago x402 real con una wallet pagadora controlada y completar el
   flujo end-to-end en producción.
+- La wallet EVM local disponible fue comprobada en Base y tiene `0 ETH` y
+  `0 USDC`; Chrome tampoco tiene un proveedor de wallet conectado. Se requiere
+  fondear una wallet pagadora o conectar una antes de ejecutar este gate.
 
 ## 3. Decisiones para el MVP
 
@@ -374,7 +377,7 @@ Para endpoints:
 1. Guardar JSON y Markdown en una transacción.
 2. Marcar el job `completed`.
 3. Crear un evento de entrega idempotente.
-4. Eliminar el workspace temporal.
+4. Liberar buffers/contexto temporal y no conservar archivos del target.
 5. Registrar métricas sin guardar secretos ni prompts completos.
 
 ## 12. Diferencia entre servicios
