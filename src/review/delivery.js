@@ -47,7 +47,11 @@ export async function sendWebhook(delivery) {
   };
   const body = JSON.stringify(event);
   const timestamp = Math.floor(Date.now() / 1000).toString();
-  const signature = createWebhookSignature(WEBHOOK_SIGNING_KEY, timestamp, body);
+  const signature = createWebhookSignature(
+    deriveWebhookSecret(delivery.order_id),
+    timestamp,
+    body,
+  );
 
   const response = await safeFetch(callbackUrl, {
     method: "POST",
@@ -78,6 +82,13 @@ export function createWebhookSignature(secret, timestamp, body) {
     .createHmac("sha256", String(secret))
     .update(`${timestamp}.${body}`)
     .digest("hex");
+}
+
+export function deriveWebhookSecret(orderId) {
+  return crypto
+    .createHmac("sha256", WEBHOOK_SIGNING_KEY)
+    .update(`x402-webhook:${String(orderId)}`)
+    .digest();
 }
 
 export function verifyWebhookSignature(secret, timestamp, body, received) {

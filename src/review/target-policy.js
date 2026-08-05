@@ -45,6 +45,9 @@ export function normalizeReviewTarget(input) {
     };
   }
 
+  if (url.protocol !== "https:") {
+    throw new TargetAccessError("endpoint targets must use HTTPS");
+  }
   return { kind: "https_url", url: url.toString() };
 }
 

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createWebhookSignature,
+  deriveWebhookSecret,
   validateCallbackUrl,
   verifyWebhookSignature,
 } from "../src/review/delivery.js";
@@ -27,6 +28,7 @@ test("normalizes public GitHub targets and callback URLs", () => {
   );
   assert.throws(() => validateCallbackUrl("http://buyer.example/callback"), /HTTPS/);
   assert.throws(() => validateCallbackUrl("https://127.0.0.1/callback"), /private|loopback/i);
+  assert.throws(() => normalizeReviewTarget("http://example.com/review"), /HTTPS/);
 });
 
 test("blocks private target addresses before any request", async () => {
@@ -46,6 +48,12 @@ test("webhook signatures are verifiable and tamper resistant", () => {
   const signature = createWebhookSignature("test-secret", timestamp, body);
   assert.equal(verifyWebhookSignature("test-secret", timestamp, body, `sha256=${signature}`), true);
   assert.equal(verifyWebhookSignature("test-secret", timestamp, `${body}x`, signature), false);
+});
+
+test("webhook secrets are derived per order", () => {
+  const first = deriveWebhookSecret("order-a");
+  const second = deriveWebhookSecret("order-b");
+  assert.notDeepEqual(first, second);
 });
 
 test("deterministic endpoint reviewer emits a validated result and report", async () => {

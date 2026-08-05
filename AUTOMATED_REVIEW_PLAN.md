@@ -419,7 +419,8 @@ Requisitos:
 
 - Solo HTTPS.
 - Bloqueo de IPs privadas, localhost y metadata endpoints.
-- HMAC-SHA256 con un secreto por pedido, derivado o almacenado cifrado.
+- HMAC-SHA256 con un secreto derivado por pedido a partir de la clave maestra
+  fuera de Git (`WEBHOOK_SIGNING_KEY`).
 - Headers con event ID, timestamp y firma.
 - Timeout corto.
 - Reintentos exponenciales con jitter.
