@@ -151,7 +151,8 @@ function parsePaymentChallenge(headers, body) {
     }
   }
 
-  if (!raw && !/x402|payment|required|payto|network|accepts/i.test(body)) return null;
+  if (!raw && !/(x402|payment|required)/i.test(body)) return null;
+  if (!raw && !/(amount|asset|payto|accepts|scheme)/i.test(body)) return null;
   return {
     scheme: null,
     network: null,
@@ -175,13 +176,7 @@ function decodeBase64(value) {
 
 function isPaymentChallengeObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  return Boolean(
-    value.scheme ||
-      value.x402Version ||
-      value.version ||
-      value.accepts ||
-      value.network ||
-      value.payTo ||
-      value.paymentRequired,
-  );
+  if (value.scheme || value.x402Version || value.paymentRequired || value.accepts) return true;
+  const paymentFields = [value.asset, value.amount, value.payTo].filter(Boolean).length;
+  return Boolean(value.network && paymentFields >= 2);
 }
