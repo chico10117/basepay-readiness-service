@@ -1,6 +1,7 @@
 # Plan de revisión automática y entrega x402
 
-Estado: implementado y desplegado; pendiente únicamente el pago real controlado
+Estado: implementado y desplegado; rail x402 real de `$2` verificado; pendiente
+únicamente el pedido Quick Review real de `50 USDC`
 Última verificación operativa: 2026-08-05
 Repositorio: `x402-wallet-readiness-service`
 Alcance inicial: `Quick Review` e `Integration Triage`
@@ -46,11 +47,27 @@ Implementado en el MVP desplegado:
 
 Pendiente fuera de la automatización verificable desde este entorno:
 
-- Firmar un pago x402 real con una wallet pagadora controlada y completar el
-  flujo end-to-end en producción.
-- La wallet EVM local disponible fue comprobada en Base y tiene `0 ETH` y
-  `0 USDC`; Chrome tampoco tiene un proveedor de wallet conectado. Se requiere
-  fondear una wallet pagadora o conectar una antes de ejecutar este gate.
+- Ejecutar un pedido Quick Review real de `50 USDC` con una wallet pagadora
+  controlada y comprobar la creación, procesamiento y entrega del resultado.
+- Después del smoke test de `$2`, la wallet pagadora local volvió a `0 USDC` y
+  Chrome continúa sin un proveedor de wallet conectado. Se requiere fondearla
+  con `50 USDC` o conectar otra wallet para ejecutar este último gate.
+
+Verificado en producción el 2026-08-05:
+
+- El trigger one-shot detectó, después de tres confirmaciones, una transferencia
+  exacta de `2.000000 USDC` nativo en Base desde la wallet receptora publicada
+  hacia la wallet pagadora local. Fondeo:
+  `0x9c70b82d87f8004d5c0d26d613be83e8ee1b65c3dbf7e9100a44dd1a88a5fc75`.
+- Validó nuevamente red, contrato USDC, monto y `payTo`, firmó el challenge de
+  `$2` y obtuvo HTTP `200`. Settlement:
+  `0x9d1e5a373697b5caca850d5dd4d01390b7fdc649d5ee96c1ce00a0d9473f6baa`.
+- Ambos recibos tienen status `0x1` y contienen el `Transfer` USDC exacto en la
+  dirección esperada. Una segunda ejecución devolvió `alreadyCompleted`; solo
+  existe un transfer saliente de `2 USDC` desde la wallet pagadora.
+- El estado privado quedó sin la autorización de pago y con permisos `0600`.
+  Esta prueba valida settlement real, pero no sustituye el Quick Review pagado
+  de `50 USDC` exigido por el criterio de salida.
 
 ## 3. Decisiones para el MVP
 
@@ -566,7 +583,8 @@ y un fallo temporal se recupera sin duplicar el resultado.
 - [x] Verificar que pedidos existentes continúan funcionando.
 - [x] Activar worker con concurrencia `1`.
 - [x] Ejecutar un pedido sintético sin pago.
-- [ ] Ejecutar un pago real controlado de extremo a extremo.
+- [x] Ejecutar el smoke test one-shot de `2 USDC` cuando llegue el fondeo exacto.
+- [ ] Ejecutar un pedido Quick Review real de `50 USDC` de extremo a extremo.
 - [x] Verificar DB, resultado, Markdown, webhook y restart recovery.
 - [x] Activar alertas y documentar runbook.
 - [x] Mantener concurrencia `1` con métricas estables antes de aumentarla.

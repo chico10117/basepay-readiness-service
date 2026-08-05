@@ -256,6 +256,39 @@ curl -i -X POST 'http://localhost:4021/api/x402/services/integration-triage' \
   --data '{"repository_or_url":"https://github.com/example/project","goal":"Make x402 payment challenges browser-readable"}'
 ```
 
+### One-shot 2 USDC production smoke test
+
+`npm run test:x402-trigger` watches for one exact native Base USDC transfer:
+
+- sender: `0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9`
+- recipient: `0x98aA548A9cE3Ed957657E62B73cD44543FD5ac22`
+- amount: `2.000000 USDC`
+
+After three Base confirmations it uses the recipient's local AgentCash signer
+to call the `$2` readiness endpoint. Before signing, it rejects any challenge
+whose network, token, amount, or `payTo` differs from the values above. Its
+private state is stored with mode `0600` outside the repository at
+`~/.agentcash/x402-2usdc-trigger.json`; the private key and payment
+authorization are never printed. A filesystem lock, persistent authorization,
+and on-chain outgoing-transfer check make the trigger one-shot and prevent a
+second payment after a retry or process restart.
+
+This smoke test proves the production x402 payment rail. It does not replace
+the separate `50 USDC` Quick Review order gate.
+
+The one-shot completed successfully on 2026-08-05:
+
+- funding transaction:
+  [`0x9c70...fc75`](https://basescan.org/tx/0x9c70b82d87f8004d5c0d26d613be83e8ee1b65c3dbf7e9100a44dd1a88a5fc75)
+- x402 settlement:
+  [`0x9d1e...6baa`](https://basescan.org/tx/0x9d1e5a373697b5caca850d5dd4d01390b7fdc649d5ee96c1ce00a0d9473f6baa)
+- paid response: HTTP `200`
+- replay check: `alreadyCompleted`, with exactly one outgoing `2 USDC`
+  transfer from the payer wallet
+
+The persisted completion state contains no payment authorization. Re-running
+the command returns the recorded proof without signing or paying again.
+
 Free metadata:
 
 ```sh
