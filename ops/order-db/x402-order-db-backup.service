@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up x402 paid-service orders database
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/x402-order-db/backup.sh

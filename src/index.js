@@ -9,6 +9,13 @@ import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { paymentMiddleware } from "@x402/express";
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
+import {
+  initializeOrderStore,
+  markOrderSettled,
+  markOrderSettlementFailed,
+  orderStoreConfigured,
+  saveVerifiedOrder,
+} from "./order-store.js";
 
 const PAY_TO =
   process.env.PAY_TO ?? "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9";
@@ -98,6 +105,18 @@ const PAYMENT_REQUEST_HEADERS = [
   "X402-PAYMENT",
   "X402-Payment",
 ];
+const PAYMENT_AUTHORIZATION_HEADERS = [
+  "PAYMENT-SIGNATURE",
+  "Payment-Signature",
+  "X-PAYMENT",
+  "X-Payment",
+  "PAYMENT",
+  "Payment",
+  "X-402-PAYMENT",
+  "X-402-Payment",
+  "X402-PAYMENT",
+  "X402-Payment",
+];
 const PAYMENT_RESPONSE_HEADERS = [
   "WWW-Authenticate",
   "Payment",
@@ -129,6 +148,9 @@ const resourceServer = new x402ResourceServer(facilitatorClient).register(
   NETWORK,
   new ExactEvmScheme(),
 );
+resourceServer
+  .onAfterSettle(handleStoredServiceOrderSettlement)
+  .onSettleFailure(handleStoredServiceOrderSettlementFailure);
 let resourceServerReady = false;
 let resourceServerInitPromise = null;
 
@@ -152,7 +174,7 @@ app.use(
 
 const serviceInfo = {
   name: "Agent Commerce Desk",
-  version: "0.11.8",
+  version: "0.11.9",
   description:
     "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
   payTo: PAY_TO,
@@ -1119,9 +1141,7 @@ app.use(async (req, res, next) => {
   }
 });
 
-app.use(
-  paymentMiddleware(
-    {
+const paidRouteConfigs = withHeadPaymentRoutes({
       "GET /api/readiness": {
         accepts: [
           {
@@ -1301,7 +1321,11 @@ app.use(
         mimeType: "application/json",
         extensions: integrationTriageDiscoveryExtension({ method: "POST" }),
       },
-    },
+    });
+
+app.use(
+  paymentMiddleware(
+    paidRouteConfigs,
     resourceServer,
     undefined,
     undefined,
@@ -1377,7 +1401,7 @@ app.get("/api/x402/weather/current", async (req, res, next) => {
 
 app.get("/api/x402/services/integration-triage", async (req, res, next) => {
   try {
-    res.json(buildIntegrationTriageOrder(integrationTriageParams(req)));
+    res.json(await buildAndStoreServiceOrder(req, buildIntegrationTriageOrder));
   } catch (error) {
     next(error);
   }
@@ -1385,7 +1409,7 @@ app.get("/api/x402/services/integration-triage", async (req, res, next) => {
 
 app.get("/api/x402/services/quick-review", async (req, res, next) => {
   try {
-    res.json(buildQuickReviewOrder(integrationTriageParams(req)));
+    res.json(await buildAndStoreServiceOrder(req, buildQuickReviewOrder));
   } catch (error) {
     next(error);
   }
@@ -1393,7 +1417,7 @@ app.get("/api/x402/services/quick-review", async (req, res, next) => {
 
 app.post("/api/x402/services/integration-triage", async (req, res, next) => {
   try {
-    res.json(buildIntegrationTriageOrder(integrationTriageParams(req)));
+    res.json(await buildAndStoreServiceOrder(req, buildIntegrationTriageOrder));
   } catch (error) {
     next(error);
   }
@@ -1401,7 +1425,7 @@ app.post("/api/x402/services/integration-triage", async (req, res, next) => {
 
 app.post("/api/x402/services/quick-review", async (req, res, next) => {
   try {
-    res.json(buildQuickReviewOrder(integrationTriageParams(req)));
+    res.json(await buildAndStoreServiceOrder(req, buildQuickReviewOrder));
   } catch (error) {
     next(error);
   }
@@ -1422,6 +1446,17 @@ app.listen(PORT, () => {
     `Base wallet readiness service listening on http://localhost:${PORT}`,
   );
   console.log(`x402 network=${NETWORK} price=${PRICE} payTo=${PAY_TO}`);
+  initializeOrderStore()
+    .then(configured => {
+      console.log(
+        configured
+          ? "paid service order store ready"
+          : "paid service order store disabled",
+      );
+    })
+    .catch(error => {
+      console.error(`paid service order store unavailable: ${error.message}`);
+    });
 });
 
 function requireMarketApiKey(req) {
@@ -1453,6 +1488,16 @@ function isPaidRoutePath(pathname) {
   );
 }
 
+function withHeadPaymentRoutes(routes) {
+  const expanded = { ...routes };
+  for (const [pattern, config] of Object.entries(routes)) {
+    if (pattern.startsWith("GET ")) {
+      expanded[`HEAD ${pattern.slice(4)}`] = config;
+    }
+  }
+  return expanded;
+}
+
 function attachPaidRouteBrowserHeaders(req, res) {
   const origin = req.get("origin");
   res.set("Access-Control-Allow-Origin", origin || "*");
@@ -1479,9 +1524,15 @@ function corsAllowHeaders(req) {
 }
 
 function hasPaymentAttemptHeader(req) {
-  return PAYMENT_REQUEST_HEADERS.some(header => {
-    return header.toLowerCase().includes("payment") && Boolean(req.get(header));
-  });
+  return Boolean(paymentAttemptHeader(req));
+}
+
+function paymentAttemptHeader(req) {
+  for (const header of PAYMENT_AUTHORIZATION_HEADERS) {
+    const value = req.get(header);
+    if (value) return String(value);
+  }
+  return "";
 }
 
 function uniqueHeaderList(headers) {
@@ -2476,13 +2527,165 @@ function parseIntegrationTriageRequest(query) {
   };
 }
 
-function buildQuickReviewOrder(query) {
-  const request = parseIntegrationTriageRequest(query);
-  const acceptedAt = new Date().toISOString();
-  const orderId = createHash("sha256")
-    .update(`quick-review\n${acceptedAt}\n${JSON.stringify(request)}`)
+async function buildAndStoreServiceOrder(req, builder) {
+  const paymentHeader = paymentAttemptHeader(req);
+  if (!paymentHeader) {
+    const error = new Error("x402 payment authorization is required");
+    error.statusCode = 402;
+    throw error;
+  }
+
+  const paymentFingerprint = createHash("sha256")
+    .update(paymentHeader)
+    .digest("hex");
+  const receipt = builder(integrationTriageParams(req), paymentFingerprint);
+  receipt.persistence = {
+    status: orderStoreConfigured()
+      ? "durable_intake_record_created"
+      : "order_store_disabled",
+    settlementTracking: orderStoreConfigured(),
+  };
+
+  try {
+    await saveVerifiedOrder({
+      orderId: receipt.orderId,
+      service: receipt.service,
+      acceptedAt: receipt.acceptedAt,
+      request: receipt.request,
+      requestMethod: req.method,
+      requestPath: req.path,
+      paymentFingerprint,
+      payment: receipt.payment,
+      receipt,
+    });
+  } catch (error) {
+    console.error(
+      `paid service order storage failed before settlement: ${error.message}`,
+    );
+    const publicError = new Error(
+      "paid order storage is temporarily unavailable; payment was not settled",
+    );
+    publicError.statusCode = 503;
+    throw publicError;
+  }
+
+  return receipt;
+}
+
+async function handleStoredServiceOrderSettlement(context) {
+  const receipt = storedServiceOrderReceipt(context);
+  if (!receipt) return;
+
+  const transaction = optionalString(context.result?.transaction);
+  if (!transaction) {
+    console.error(
+      `paid service order ${receipt.orderId} settled without a transaction hash`,
+    );
+    return;
+  }
+
+  await retryOrderStoreMutation(
+    `record settlement for ${receipt.orderId}`,
+    () =>
+      markOrderSettled({
+        orderId: receipt.orderId,
+        transaction,
+        payerAddress: paymentPayloadPayer(context.paymentPayload),
+        network:
+          optionalString(context.result?.network) ??
+          optionalString(context.requirements?.network),
+        amountAtomic: optionalString(context.requirements?.amount),
+        payTo: optionalString(context.requirements?.payTo),
+      }),
+  );
+}
+
+async function handleStoredServiceOrderSettlementFailure(context) {
+  const receipt = storedServiceOrderReceipt(context);
+  if (!receipt) return;
+
+  await retryOrderStoreMutation(
+    `record settlement failure for ${receipt.orderId}`,
+    () =>
+      markOrderSettlementFailed({
+        orderId: receipt.orderId,
+        error: context.error?.message ?? "x402 settlement failed",
+      }),
+  );
+}
+
+function storedServiceOrderReceipt(context) {
+  const responseBody = context.transportContext?.responseBody;
+  if (!responseBody) return null;
+
+  try {
+    const receipt = JSON.parse(Buffer.from(responseBody).toString("utf8"));
+    if (
+      typeof receipt?.orderId !== "string" ||
+      !receipt?.request ||
+      ![
+        "Base USDC x402 Quick Review",
+        "Base USDC x402 Integration Triage",
+      ].includes(receipt.service)
+    ) {
+      return null;
+    }
+    return receipt;
+  } catch {
+    return null;
+  }
+}
+
+function paymentPayloadPayer(paymentPayload) {
+  return (
+    optionalString(paymentPayload?.payload?.authorization?.from) ??
+    optionalString(paymentPayload?.payload?.from) ??
+    null
+  );
+}
+
+function optionalString(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+async function retryOrderStoreMutation(label, mutation) {
+  const delays = [0, 150, 600];
+  let lastError;
+
+  for (const delay of delays) {
+    if (delay) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    try {
+      await mutation();
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  console.error(`unable to ${label}: ${lastError?.message ?? "unknown error"}`);
+}
+
+function serviceOrderDigest(prefix, acceptedAt, request, paymentFingerprint) {
+  const identity = paymentFingerprint || `${acceptedAt}\n${JSON.stringify(request)}`;
+  return createHash("sha256")
+    .update(`${prefix}\n${identity}`)
     .digest("hex")
     .slice(0, 16);
+}
+
+function buildQuickReviewOrder(query, paymentFingerprint = "") {
+  const request = parseIntegrationTriageRequest(query);
+  const acceptedAt = new Date().toISOString();
+  const orderId = serviceOrderDigest(
+    "quick-review",
+    acceptedAt,
+    request,
+    paymentFingerprint,
+  );
 
   return {
     service: "Base USDC x402 Quick Review",
@@ -2531,13 +2734,15 @@ function buildQuickReviewOrder(query) {
   };
 }
 
-function buildIntegrationTriageOrder(query) {
+function buildIntegrationTriageOrder(query, paymentFingerprint = "") {
   const request = parseIntegrationTriageRequest(query);
   const acceptedAt = new Date().toISOString();
-  const orderId = createHash("sha256")
-    .update(`${acceptedAt}\n${JSON.stringify(request)}`)
-    .digest("hex")
-    .slice(0, 16);
+  const orderId = serviceOrderDigest(
+    "integration-triage",
+    acceptedAt,
+    request,
+    paymentFingerprint,
+  );
 
   return {
     service: "Base USDC x402 Integration Triage",

@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily backup of x402 paid-service orders database
+
+[Timer]
+OnCalendar=*-*-* 04:20:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

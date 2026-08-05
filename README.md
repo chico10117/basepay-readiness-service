@@ -129,6 +129,33 @@ work. It accepts either GET query params or a POST JSON body, validates
 `repository_or_url` and `goal` before payment, then returns a paid order receipt
 and 24h delivery instructions after a valid x402 payment.
 
+The direct x402 Quick Review and Integration Triage routes persist paid-service
+intakes in PostgreSQL when `ORDER_DATABASE_URL` is configured. The handler
+stores the normalized request after facilitator verification and before it
+returns success, so a database failure prevents settlement. After successful
+x402 settlement, the resource-server hook records the payer and transaction
+hash. Retries are deduplicated with a SHA-256 fingerprint of the payment
+authorization; the authorization itself is never stored.
+
+Production runs PostgreSQL privately on the VPS loopback interface. Vercel
+continues to be the public HTTPS entrypoint and forwards requests to the VPS;
+the database is never exposed to Vercel or the public Internet.
+
+```sh
+ORDER_DATABASE_URL=postgresql://x402_orders:password@127.0.0.1:6435/x402_orders
+ORDER_STORE_REQUIRED=true
+```
+
+Operational files live under `ops/order-db/`. The included systemd timer makes
+a daily `pg_dump` backup and retains 30 days. On the VPS, recent orders can be
+reviewed without exposing an admin HTTP endpoint:
+
+```sh
+docker exec x402-orders-postgres \
+  psql -U x402_orders -d x402_orders \
+  -c "SELECT order_id, service, status, repository_or_url, goal, settlement_tx_hash, created_at FROM paid_service_orders ORDER BY created_at DESC LIMIT 20;"
+```
+
 The public root page and Open Frame point buyers directly at the sample
 `100 USDC` integration-triage order URL. GitHub issue context remains a
 secondary path for non-secret repo details after payment.
@@ -187,6 +214,7 @@ curl -i 'http://localhost:4021/api/readiness?address=0x820a7bf90d944bb26bfD9b62A
 curl -i 'http://localhost:4021/api/x402/market/crypto-snapshot?limit=10'
 curl -i 'http://localhost:4021/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=30'
 curl -i 'http://localhost:4021/api/x402/dev/repo-snapshot?repo=vercel/next.js'
+curl -I 'http://localhost:4021/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20x402%20payment%20challenges%20browser-readable'
 curl -i 'http://localhost:4021/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20x402%20payment%20challenges%20browser-readable'
 curl -i -X POST 'http://localhost:4021/api/x402/services/integration-triage' \
   -H 'Content-Type: application/json' \

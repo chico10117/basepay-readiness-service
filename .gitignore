@@ -1,5 +1,7 @@
 node_modules/
 .vercel/
 .env
+ops/order-db/data/
+ops/order-db/backups/
 npm-debug.log*
 .vercel
