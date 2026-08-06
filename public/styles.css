@@ -1,16 +1,99 @@
 :root {
+  color-scheme: light;
   --paper: #f4f1e8;
+  --panel: rgba(244, 241, 232, 0.96);
+  --surface: #fffdf7;
+  --starter-surface: #e8f8ef;
   --ink: #171512;
-  --muted: #676056;
-  --rail: #d8d0bf;
-  --green: #00a86b;
+  --muted: #625b51;
+  --line: #171512;
+  --rail: #c8bfad;
+  --green: #087a53;
+  --green-ink: #fffdf7;
   --blue: #175bd8;
-  --red: #c52d2f;
-  --shadow: rgba(23, 21, 18, 0.16);
+  --blue-ink: #ffffff;
+  --red: #ae2830;
+  --frame-shadow: #171512;
+  --grid-strong: rgba(23, 21, 18, 0.05);
+  --grid-soft: rgba(23, 21, 18, 0.04);
+  --terminal: #12110f;
+  --terminal-ink: #e9f8ef;
+  --terminal-line: rgba(255, 255, 255, 0.18);
+  --terminal-success: #a9f4c4;
+  --terminal-error: #ffd4d4;
+  --focus: #9a5400;
+  --selection: #175bd8;
+  --selection-ink: #ffffff;
+  --placeholder: #777065;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0b100e;
+  --panel: rgba(19, 26, 22, 0.97);
+  --surface: #1a231f;
+  --starter-surface: #142c22;
+  --ink: #f0ede4;
+  --muted: #adb6ae;
+  --line: #66746b;
+  --rail: #3d4942;
+  --green: #48d69a;
+  --green-ink: #06140e;
+  --blue: #8aafff;
+  --blue-ink: #07101f;
+  --red: #ff9799;
+  --frame-shadow: #020504;
+  --grid-strong: rgba(167, 198, 180, 0.07);
+  --grid-soft: rgba(167, 198, 180, 0.04);
+  --terminal: #060a08;
+  --terminal-ink: #dff7e8;
+  --terminal-line: rgba(217, 247, 229, 0.17);
+  --terminal-success: #8ff0b2;
+  --terminal-error: #ffc4c5;
+  --focus: #f2cb68;
+  --selection: #8aafff;
+  --selection-ink: #07101f;
+  --placeholder: #8d978f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --paper: #0b100e;
+    --panel: rgba(19, 26, 22, 0.97);
+    --surface: #1a231f;
+    --starter-surface: #142c22;
+    --ink: #f0ede4;
+    --muted: #adb6ae;
+    --line: #66746b;
+    --rail: #3d4942;
+    --green: #48d69a;
+    --green-ink: #06140e;
+    --blue: #8aafff;
+    --blue-ink: #07101f;
+    --red: #ff9799;
+    --frame-shadow: #020504;
+    --grid-strong: rgba(167, 198, 180, 0.07);
+    --grid-soft: rgba(167, 198, 180, 0.04);
+    --terminal: #060a08;
+    --terminal-ink: #dff7e8;
+    --terminal-line: rgba(217, 247, 229, 0.17);
+    --terminal-success: #8ff0b2;
+    --terminal-error: #ffc4c5;
+    --focus: #f2cb68;
+    --selection: #8aafff;
+    --selection-ink: #07101f;
+    --placeholder: #8d978f;
+  }
 }
 
 * {
   box-sizing: border-box;
+}
+
+::selection {
+  background: var(--selection);
+  color: var(--selection-ink);
 }
 
 body {
@@ -18,11 +101,15 @@ body {
   min-height: 100vh;
   color: var(--ink);
   background:
-    linear-gradient(90deg, rgba(23, 21, 18, 0.05) 1px, transparent 1px),
-    linear-gradient(rgba(23, 21, 18, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-strong) 1px, transparent 1px),
+    linear-gradient(var(--grid-soft) 1px, transparent 1px),
     var(--paper);
   background-size: 28px 28px;
   font-family: ui-monospace, "SFMono-Regular", "Cascadia Mono", Menlo, monospace;
+  scrollbar-color: var(--rail) var(--paper);
+  transition:
+    color 180ms ease,
+    background-color 180ms ease;
 }
 
 .shell {
@@ -40,9 +127,13 @@ body {
 
 .workbench,
 .ledger {
-  border: 1px solid var(--ink);
-  background: rgba(244, 241, 232, 0.94);
-  box-shadow: 8px 8px 0 var(--ink);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: 8px 8px 0 var(--frame-shadow);
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
 }
 
 .workbench {
@@ -50,6 +141,40 @@ body {
   align-content: start;
   gap: 24px;
   padding: clamp(22px, 4vw, 44px);
+}
+
+.workbench-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.theme-toggle {
+  visibility: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: fit-content;
+  min-height: 44px;
+  padding: 9px 12px;
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+:root[data-theme-ready] .theme-toggle {
+  visibility: visible;
+}
+
+.theme-toggle-swatch {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line);
+  background: linear-gradient(90deg, var(--ink) 50%, var(--paper) 50%);
+  border-radius: 50%;
 }
 
 .headline {
@@ -89,7 +214,7 @@ h1 {
 }
 
 .problem div {
-  border-top: 1px solid var(--ink);
+  border-top: 1px solid var(--line);
   padding-top: 14px;
 }
 
@@ -110,24 +235,25 @@ h1 {
   align-content: start;
   gap: 10px;
   min-height: 208px;
-  border: 1px solid var(--ink);
-  background: #fffdf7;
+  border: 1px solid var(--line);
+  background: var(--surface);
   padding: 16px;
 }
 
 .starter-offer {
-  background: #ecfff7;
+  background: var(--starter-surface);
 }
 
 .starter-offer .price {
   background: var(--green);
+  color: var(--green-ink);
 }
 
 .price {
   width: fit-content;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--line);
   background: var(--blue);
-  color: #ffffff;
+  color: var(--blue-ink);
   padding: 5px 8px;
   font-size: 13px;
   font-weight: 900;
@@ -177,7 +303,7 @@ button,
 select,
 textarea {
   min-height: 48px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--line);
   color: var(--ink);
   font: inherit;
 }
@@ -187,7 +313,13 @@ select,
 textarea {
   width: 100%;
   padding: 0 14px;
-  background: #fffdf7;
+  background: var(--surface);
+  caret-color: var(--green);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--placeholder);
 }
 
 select {
@@ -204,7 +336,7 @@ textarea {
 button {
   cursor: pointer;
   background: var(--green);
-  color: #ffffff;
+  color: var(--green-ink);
   font-weight: 900;
   transition:
     transform 140ms ease,
@@ -213,13 +345,31 @@ button {
 
 button:hover {
   transform: translate(-2px, -2px);
-  box-shadow: 4px 4px 0 var(--ink);
+  box-shadow: 4px 4px 0 var(--frame-shadow);
+}
+
+button:active,
+.order-link:active {
+  transform: translate(0, 0);
+  box-shadow: none;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
+  box-shadow: none;
+}
+
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
 }
 
 .result {
-  border: 1px solid var(--ink);
-  background: #12110f;
-  color: #e9f8ef;
+  border: 1px solid var(--line);
+  background: var(--terminal);
+  color: var(--terminal-ink);
   min-height: 280px;
 }
 
@@ -229,12 +379,12 @@ button:hover {
   gap: 10px;
   min-height: 42px;
   padding: 0 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
-  color: #a9f4c4;
+  border-bottom: 1px solid var(--terminal-line);
+  color: var(--terminal-success);
 }
 
 .status-line.error {
-  color: #ffd4d4;
+  color: var(--terminal-error);
 }
 
 .status-line.error .status-dot {
@@ -269,13 +419,16 @@ pre {
 .order-link {
   display: block;
   min-height: 48px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--line);
   background: var(--green);
-  color: #ffffff;
+  color: var(--green-ink);
   padding: 14px 16px;
   text-align: center;
   text-decoration: none;
   font-weight: 900;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .compact-link {
@@ -285,12 +438,22 @@ pre {
 
 .order-link:hover {
   transform: translate(-2px, -2px);
-  box-shadow: 4px 4px 0 var(--ink);
+  box-shadow: 4px 4px 0 var(--frame-shadow);
 }
 
 .secondary-link,
 .secondary-button {
   background: var(--blue);
+  color: var(--blue-ink);
+}
+
+a:not(.order-link) {
+  color: var(--blue);
+  text-underline-offset: 3px;
+}
+
+a:not(.order-link):hover {
+  text-decoration-thickness: 2px;
 }
 
 .button-row {
@@ -341,7 +504,7 @@ code {
 .stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  border: 1px solid var(--ink);
+  border: 1px solid var(--line);
 }
 
 .stats div {
@@ -349,8 +512,8 @@ code {
   gap: 4px;
   min-height: 98px;
   padding: 12px;
-  border-right: 1px solid var(--ink);
-  background: #fffdf7;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
 }
 
 .stats div:last-child {
@@ -384,6 +547,21 @@ code {
 .receipt span {
   color: var(--muted);
   line-height: 1.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body,
+  .workbench,
+  .ledger,
+  button,
+  .order-link {
+    transition: none;
+  }
+
+  button:hover,
+  .order-link:hover {
+    transform: none;
+  }
 }
 
 @media (max-width: 860px) {

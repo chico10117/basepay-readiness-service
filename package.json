@@ -9,7 +9,7 @@
     "worker": "node scripts/run-review-worker.js",
     "reconcile:settlements": "node scripts/reconcile-settlements.js",
     "test:x402-trigger": "node scripts/conditional-x402-payment.js",
-    "check": "for file in src/*.js src/review/*.js src/routes/*.js scripts/*.js; do node --check \"$file\"; done",
+    "check": "for file in public/*.js src/*.js src/review/*.js src/routes/*.js scripts/*.js; do node --check \"$file\"; done",
     "test": "node --test"
   },
   "dependencies": {

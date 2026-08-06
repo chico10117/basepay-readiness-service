@@ -3,13 +3,28 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f4f1e8" />
     <title>Agent Commerce Desk</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script src="/theme.js"></script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <main class="shell">
       <section class="workbench" aria-labelledby="title">
+        <div class="workbench-toolbar">
+          <button
+            class="theme-toggle"
+            type="button"
+            data-theme-toggle
+            aria-pressed="false"
+            aria-label="Color theme: light. Switch to dark mode."
+          >
+            <span class="theme-toggle-swatch" aria-hidden="true"></span>
+            <span data-theme-label>Light mode</span>
+          </button>
+        </div>
         <div class="headline">
           <p class="kicker">USDC on Base · agent commerce builds</p>
           <h1 id="title">Agent Commerce Desk</h1>
