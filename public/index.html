@@ -4,170 +4,277 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f4f1e8" />
-    <title>Agent Commerce Desk</title>
+    <meta name="theme-color" content="#f1efe6" />
+    <meta
+      name="description"
+      content="Inspect and validate an x402 endpoint before an autonomous agent spends USDC."
+    />
+    <title>x402 Preflight — inspect before payment</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="shell">
-      <section class="workbench" aria-labelledby="title">
-        <div class="workbench-toolbar">
-          <button
-            class="theme-toggle"
-            type="button"
-            data-theme-toggle
-            aria-pressed="false"
-            aria-label="Color theme: light. Switch to dark mode."
-          >
-            <span class="theme-toggle-swatch" aria-hidden="true"></span>
-            <span data-theme-label>Light mode</span>
-          </button>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="masthead">
+      <a class="brand" href="/" aria-label="x402 Preflight home">
+        <span class="brand-mark" aria-hidden="true">402</span>
+        <span>x402 Preflight</span>
+      </a>
+      <nav class="nav-links" aria-label="Developer resources">
+        <a href="/openapi.json">OpenAPI</a>
+        <a href="/llms.txt">llms.txt</a>
+        <a href="/mcp">MCP</a>
+      </nav>
+      <button
+        class="theme-toggle"
+        type="button"
+        data-theme-toggle
+        aria-pressed="false"
+        aria-label="Color theme: light. Switch to dark mode."
+      >
+        <span class="theme-toggle-swatch" aria-hidden="true"></span>
+        <span data-theme-label>Light mode</span>
+      </button>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Payment intelligence · read only</p>
+          <h1 id="hero-title">Know the payment surface before the wallet moves.</h1>
+          <p class="hero-dek">
+            Before paying an unknown x402 resource, inspect its payment
+            requirements, price, network, asset, receiver, discovery metadata,
+            and observable operational signals.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#inspector">Run a free inspection</a>
+            <a class="button button-quiet" href="/openapi.json">Read the contract</a>
+          </div>
+          <ul class="signal-rail" aria-label="Safety properties">
+            <li><span aria-hidden="true"></span>No wallet connection</li>
+            <li><span aria-hidden="true"></span>No payment headers forwarded</li>
+            <li><span aria-hidden="true"></span>No automatic spending</li>
+          </ul>
         </div>
-        <div class="headline">
-          <p class="kicker">USDC on Base · agent commerce builds</p>
-          <h1 id="title">Agent Commerce Desk</h1>
-          <p class="dek">
-            We make an agent/API wallet safe to publish, payment-readable, and
-            easy for buyers to verify before they send USDC on Base.
+
+        <aside class="clearance-ticket" aria-label="Example preflight clearance">
+          <div class="ticket-head">
+            <span>PRE-FLIGHT / 001</span>
+            <span class="live-mark">READ ONLY</span>
+          </div>
+          <dl>
+            <div>
+              <dt>Target</dt>
+              <dd>api.seller.example/report</dd>
+            </div>
+            <div>
+              <dt>Expected rail</dt>
+              <dd>Base · USDC · exact</dd>
+            </div>
+            <div>
+              <dt>Spend ceiling</dt>
+              <dd>$1.00 USD</dd>
+            </div>
+          </dl>
+          <div class="ticket-verdict">
+            <span class="verdict-light" aria-hidden="true"></span>
+            <div>
+              <small>DETERMINISTIC VERDICT</small>
+              <strong>ALLOW</strong>
+            </div>
+            <span class="score">92/100</span>
+          </div>
+          <p class="ticket-note">
+            Observed evidence expires. Preflight does not attest seller identity,
+            future availability, settlement, or business outcome.
+          </p>
+        </aside>
+      </section>
+
+      <section class="inspector section-shell" id="inspector" aria-labelledby="inspector-title">
+        <div class="section-heading">
+          <p class="eyebrow">Free endpoint</p>
+          <h2 id="inspector-title">Inspect without presenting payment credentials</h2>
+          <p>
+            The server performs bounded HTTPS probes only. Targets and every
+            redirect are checked against private and reserved networks.
           </p>
         </div>
 
-        <section class="problem" aria-label="Problem solved">
-          <div>
-            <p class="section-label">Problem</p>
-            <p>Agent builders can ship a paid API before they know whether the receiving wallet, x402 metadata, or buyer proof is clean.</p>
-          </div>
-          <div>
-            <p class="section-label">API proof</p>
-            <p>The live checker reports wallet history, contract status, native USDC readiness, and visible Base activity.</p>
-          </div>
-          <div>
-            <p class="section-label">Paid work</p>
-            <p>The service turns that proof into a usable payment setup, monitor, or QA harness for real buyers.</p>
-          </div>
-        </section>
-
-        <section class="offers" aria-label="Fixed price services">
-          <article class="starter-offer">
-            <div class="price">$50</div>
-            <h2>Quick x402 readback</h2>
-            <p>One endpoint or listing checked for payTo, amount, CORS, cache, and the next patch to make it buyer-readable.</p>
-          </article>
-          <article>
-            <div class="price">$100</div>
-            <h2>Same-day kickoff</h2>
-            <p>One focused payment, VPS, wallet, or agent QA blocker scoped and started today. Counts as credit toward larger work.</p>
-          </article>
-          <article>
-            <div class="price">$150</div>
-            <h2>Base USDC payment setup</h2>
-            <p>Receiving wallet check, x402-ready endpoint, agent-card metadata, deployment notes, and test proof.</p>
-          </article>
-          <article>
-            <div class="price">$200</div>
-            <h2>VPS health dashboard</h2>
-            <p>One VPS monitor with uptime, disk, memory, service checks, and a simple web status page.</p>
-          </article>
-          <article>
-            <div class="price">$250</div>
-            <h2>Wallet risk monitor</h2>
-            <p>USDT blacklist and wallet activity checks with a repeatable report for treasury or bot wallets.</p>
-          </article>
-          <article>
-            <div class="price">$300</div>
-            <h2>Agent QA harness</h2>
-            <p>Automated chatbot or agent test runner with transcripts, pass/fail checks, and deployment instructions.</p>
-          </article>
-        </section>
-
-        <form class="checker" id="checker">
-          <div>
-            <p class="section-label">Live proof</p>
-            <p class="section-copy">Free preview of the receiving wallet check used for the payment setup service.</p>
-          </div>
-          <label for="address">Base address</label>
-          <div class="input-row">
+        <form class="inspection-form" id="checker">
+          <div class="field field-url">
+            <label for="resource-url">Resource URL</label>
             <input
-              id="address"
-              name="address"
-              spellcheck="false"
-              autocomplete="off"
-              value="0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9"
+              id="resource-url"
+              name="resource_url"
+              type="url"
+              inputmode="url"
+              autocomplete="url"
+              placeholder="https://seller.example/api/resource"
+              required
             />
-            <button type="submit">Preview</button>
           </div>
+          <div class="field">
+            <label for="request-method">Method</label>
+            <select id="request-method" name="method">
+              <option>GET</option>
+              <option>HEAD</option>
+              <option>POST</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="expected-network">Expected network</label>
+            <input
+              id="expected-network"
+              name="expected_network"
+              value="eip155:8453"
+              spellcheck="false"
+            />
+          </div>
+          <div class="field">
+            <label for="max-price">Max price (USD)</label>
+            <input
+              id="max-price"
+              name="max_price_usd"
+              type="number"
+              min="0"
+              max="1000000"
+              step="0.01"
+              value="1"
+            />
+          </div>
+          <button class="button button-primary submit-button" type="submit">
+            Inspect endpoint
+          </button>
         </form>
 
-        <section class="result" aria-live="polite">
-          <div class="status-line">
-            <span class="status-dot"></span>
-            <span id="status">Ready for preview</span>
-          </div>
-          <pre id="output">Submit an address to see the free readiness preview.</pre>
+        <section class="report-console" aria-labelledby="report-title">
+          <header>
+            <div>
+              <p class="console-label">Machine-readable report</p>
+              <h3 id="report-title">Inspection result</h3>
+            </div>
+            <output id="status" data-state="idle" aria-live="polite">Ready</output>
+          </header>
+          <pre id="output" tabindex="0" aria-live="polite"><code>Submit a public HTTPS x402 resource to see its challenge, policy checks, evidence, and claim boundary.</code></pre>
         </section>
       </section>
 
-      <aside class="ledger" aria-label="Service details">
+      <section class="capabilities section-shell" aria-labelledby="capabilities-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">Canonical agent surface</p>
+          <h2 id="capabilities-title">One decision path. Three capabilities.</h2>
+        </div>
+        <ol class="flight-plan">
+          <li>
+            <span class="step">01</span>
+            <div>
+              <h3><code>inspect_x402_endpoint</code></h3>
+              <p>Use first for a bounded, free read of the live payment challenge.</p>
+            </div>
+            <span class="access-tag">FREE</span>
+            <code class="route">POST /api/preflight/inspect</code>
+          </li>
+          <li>
+            <span class="step">02</span>
+            <div>
+              <h3><code>audit_x402_endpoint</code></h3>
+              <p>Use when a buyer needs deeper discovery, schema, CORS, redirect, and cache evidence.</p>
+            </div>
+            <span class="access-tag paid">$0.05 x402</span>
+            <code class="route">POST /api/x402/preflight/audit</code>
+          </li>
+          <li>
+            <span class="step">03</span>
+            <div>
+              <h3><code>order_x402_remediation</code></h3>
+              <p>Escalate a blocked or risky audit into a durable remediation intake.</p>
+            </div>
+            <span class="access-tag paid">x402 PAID</span>
+            <code class="route">POST /api/x402/preflight/remediation</code>
+          </li>
+        </ol>
+      </section>
+
+      <section class="trust-grid section-shell" aria-labelledby="trust-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">Evidence, not endorsement</p>
+          <h2 id="trust-title">What a report can—and cannot—tell an agent</h2>
+        </div>
+        <article>
+          <span class="article-index">CHECKS</span>
+          <h3>Observable now</h3>
+          <ul>
+            <li>HTTP 402 challenge and x402 version</li>
+            <li>Scheme, network, asset, amount, and receiver</li>
+            <li>Bazaar, OpenAPI, llms.txt, and agent metadata</li>
+            <li>CORS, redirects, content type, cache, latency, and size</li>
+          </ul>
+        </article>
+        <article>
+          <span class="article-index">BOUNDARY</span>
+          <h3>Not guaranteed</h3>
+          <ul>
+            <li>Seller identity, intent, or future availability</li>
+            <li>Contract safety or downstream business outcome</li>
+            <li>That a later payment will verify or settle</li>
+            <li>That the resource remains unchanged after expiry</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="integration section-shell" aria-labelledby="integration-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">Agent integration</p>
+          <h2 id="integration-title">Discover once, call through the interface you already use</h2>
+        </div>
+        <div class="integration-grid">
+          <div>
+            <h3>HTTP + OpenAPI</h3>
+            <p>Strict request, report, receipt, and error schemas are published at the canonical contract.</p>
+            <a href="/openapi.json">Open /openapi.json <span aria-hidden="true">↗</span></a>
+          </div>
+          <div>
+            <h3>Remote MCP</h3>
+            <p>Streamable HTTP tool discovery exposes exactly the same three capabilities and no labs tools.</p>
+            <code id="mcp-endpoint">/mcp</code>
+          </div>
+          <div>
+            <h3>x402 + Bazaar</h3>
+            <p>The unpaid 402 response remains authoritative for live price, network, asset, and receiver.</p>
+            <a href="/.well-known/x402.json">Open x402 metadata <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+      </section>
+
+      <details class="labs section-shell">
+        <summary>Labs and legacy endpoints</summary>
         <div>
-          <div class="stamp">How to order</div>
-          <p class="side-copy">
-            Open a work request with the target wallet, repo, domain, VPS, or
-            agent flow. A 50 USDC readback checks one blocker; 100 USDC starts
-            one scoped fix today.
+          <p>
+            Existing wallet readiness, market data, weather, repository
+            snapshots, marketplace adapters, and signing helpers remain
+            available for current consumers. They are compatibility surfaces,
+            not primary x402 Preflight capabilities.
           </p>
+          <a href="/manifest">See compatibility routes in the manifest</a>
         </div>
-
-        <a class="order-link" href="/api/x402/services/quick-review?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&amp;goal=Verify%20the%20x402%20payment%20challenge%20and%20identify%20the%20next%20patch.&amp;contact=github%3A%40buyer&amp;constraints=No%20production%20writes%20without%20approval.">
-          Start $50 x402 readback
-        </a>
-        <a class="order-link" href="/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&amp;goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable%20and%20ready%20for%20marketplace%20listing.&amp;contact=github%3A%40buyer&amp;constraints=No%20production%20writes%20without%20approval.">
-          Start $100 x402 order
-        </a>
-        <a class="order-link secondary-link" href="https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml" rel="noreferrer">
-          Add GitHub context
-        </a>
-        <a class="order-link secondary-link" href="/wallet-sign">
-          Open wallet signer
-        </a>
-
-        <div class="stats">
-          <div>
-            <span>$50</span>
-            <small>readback option</small>
-          </div>
-          <div>
-            <span>24h</span>
-            <small>starter delivery</small>
-          </div>
-          <div>
-            <span>Base</span>
-            <small>USDC network</small>
-          </div>
-        </div>
-
-        <div class="receipt">
-          <p>Pay to</p>
-          <code>0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9</code>
-        </div>
-
-        <div class="receipt">
-          <p>API problem solved</p>
-          <span>Checks whether a Base wallet is clean enough to publish as a USDC receiving address.</span>
-        </div>
-
-        <div class="receipt">
-          <p>x402 order endpoint</p>
-          <code>GET /api/x402/services/integration-triage</code>
-        </div>
-
-        <div class="receipt">
-          <p>What closes the sale</p>
-          <span>We sell operational setup and proof, then use the API as a live artifact inside the offer.</span>
-        </div>
-      </aside>
+      </details>
     </main>
-    <script src="/app.js"></script>
+
+    <footer>
+      <span>x402 Preflight</span>
+      <span>Observe first. Decide deterministically. Keep custody client-side.</span>
+    </footer>
+
+    <script src="/app.js" defer></script>
   </body>
 </html>

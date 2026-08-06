@@ -8,9 +8,12 @@ import {
   initializeOrderStore,
   markDeliveryDelivered,
   markDeliveryFailed,
+  recordServiceHeartbeat,
   requeueExpiredReviewJobs,
   requeueStaleDeliveries,
 } from "../order-store.js";
+import { serviceRuntime } from "../service-runtime.js";
+import { createTelemetry } from "../telemetry.js";
 import { sendWebhook } from "./delivery.js";
 import { runReviewAgent } from "./agent-runner.js";
 import { renderReviewMarkdown } from "./markdown-renderer.js";
@@ -30,6 +33,8 @@ const MAX_DURATION_MS = Math.max(
 const PUBLIC_URL = String(
   process.env.PUBLIC_URL ?? "https://x402-wallet-readiness-service.vercel.app",
 ).replace(/\/$/, "");
+const RUNTIME = serviceRuntime();
+const TELEMETRY = createTelemetry();
 
 export async function runReviewWorker({ once = false } = {}) {
   if (!once && !WORKER_ENABLED) {
@@ -48,6 +53,10 @@ export async function runReviewWorker({ once = false } = {}) {
   process.once("SIGINT", stop);
 
   do {
+    await recordServiceHeartbeat("review-worker", {
+      version: RUNTIME.version,
+      commitSha: RUNTIME.commitSha,
+    }).catch(error => logError("record worker heartbeat", error));
     await requeueExpiredReviewJobs().catch(error => logError("requeue expired jobs", error));
     await requeueStaleDeliveries().catch(error => logError("requeue stale deliveries", error));
     let worked = false;
@@ -96,6 +105,13 @@ async function processJob(job, workerId) {
       agentMetadata: review.metadata,
       status: "completed",
     });
+    if (job.service.includes("Integration Triage")) {
+      TELEMETRY.record("remediation_order_completed", {
+        route: "/api/x402/preflight/remediation",
+        network: job.network,
+        price_usd: job.amount_usd,
+      });
+    }
     console.log(JSON.stringify({ event: "review.completed", orderId: job.order_id }));
   } catch (error) {
     if (error instanceof TargetAccessError) {
@@ -228,10 +244,21 @@ async function processDelivery(workerId) {
   try {
     const response = await sendWebhook(delivery);
     await markDeliveryDelivered(delivery.delivery_id, response.status);
+    TELEMETRY.record("resource_delivered", {
+      route: "review-webhook",
+      method: "POST",
+      status_code: response.status,
+    });
     console.log(JSON.stringify({ event: "review.delivery_completed", orderId: delivery.order_id }));
   } catch (error) {
     const retry = !/private|localhost|metadata|HTTPS|credentials/i.test(error.message);
     await markDeliveryFailed(delivery.delivery_id, error.message, retry, error.httpStatus ?? null);
+    TELEMETRY.record("resource_failed", {
+      route: "review-webhook",
+      method: "POST",
+      status_code: error.httpStatus ?? 500,
+      error_code: "WEBHOOK_DELIVERY_FAILED",
+    });
     logError(`delivery ${delivery.order_id}`, error);
   }
   return true;

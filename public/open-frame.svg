@@ -1,25 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 628" role="img" aria-labelledby="title desc">
-  <title id="title">Agent Commerce Desk Open Frame</title>
-  <desc id="desc">Base USDC wallet readiness and x402 service discovery frame.</desc>
-  <rect width="1200" height="628" fill="#f8fafc"/>
-  <rect x="64" y="64" width="1072" height="500" rx="28" fill="#111827"/>
-  <rect x="96" y="96" width="1008" height="436" rx="18" fill="#ffffff"/>
-  <text x="132" y="172" font-family="Inter, Arial, sans-serif" font-size="34" font-weight="700" fill="#0f172a">Agent Commerce Desk</text>
-  <text x="132" y="226" font-family="Inter, Arial, sans-serif" font-size="24" fill="#334155">Open-Frames compatible x402 service for Base USDC work</text>
-  <g transform="translate(132 286)">
-    <rect width="282" height="108" rx="18" fill="#ecfdf5"/>
-    <text x="28" y="46" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700" fill="#047857">Wallet proof</text>
-    <text x="28" y="80" font-family="Inter, Arial, sans-serif" font-size="18" fill="#065f46">ETH, USDC, tx count, token flow</text>
-  </g>
-  <g transform="translate(458 286)">
-    <rect width="282" height="108" rx="18" fill="#eff6ff"/>
-    <text x="28" y="46" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700" fill="#1d4ed8">x402 APIs</text>
-    <text x="28" y="80" font-family="Inter, Arial, sans-serif" font-size="18" fill="#1e40af">Paid endpoints settle in USDC</text>
-  </g>
-  <g transform="translate(784 286)">
-    <rect width="282" height="108" rx="18" fill="#fff7ed"/>
-    <text x="28" y="46" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="700" fill="#c2410c">Agent work</text>
-    <text x="28" y="80" font-family="Inter, Arial, sans-serif" font-size="18" fill="#9a3412">Same-day Base USDC kickoff</text>
-  </g>
-  <text x="132" y="470" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="19" fill="#475569">0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9</text>
+  <title id="title">x402 Preflight Open Frame</title>
+  <desc id="desc">Read-only x402 endpoint inspection before an agent spends USDC.</desc>
+  <rect width="1200" height="628" fill="#f1efe6"/>
+  <path d="M0 40h1200M0 588h1200" stroke="#13201c" stroke-width="2"/>
+  <rect x="64" y="70" width="1072" height="488" fill="#faf8f0" stroke="#13201c" stroke-width="3"/>
+  <rect x="96" y="102" width="84" height="54" fill="#b9f227" stroke="#13201c" stroke-width="2"/>
+  <text x="112" y="137" font-family="monospace" font-size="22" font-weight="700" fill="#162300">402</text>
+  <text x="208" y="140" font-family="sans-serif" font-size="38" font-weight="700" fill="#13201c">x402 Preflight</text>
+  <text x="96" y="255" font-family="sans-serif" font-size="49" font-weight="700" fill="#13201c">Inspect before the wallet moves.</text>
+  <text x="96" y="308" font-family="sans-serif" font-size="24" fill="#5f6b65">Price · network · asset · receiver · discovery · operations</text>
+  <line x1="96" y1="365" x2="1104" y2="365" stroke="#65736b" stroke-width="2"/>
+  <text x="96" y="421" font-family="monospace" font-size="21" fill="#1e5be0">01  inspect_x402_endpoint</text>
+  <text x="452" y="421" font-family="monospace" font-size="21" fill="#1e5be0">02  audit_x402_endpoint</text>
+  <text x="786" y="421" font-family="monospace" font-size="21" fill="#1e5be0">03  order_x402_remediation</text>
+  <rect x="96" y="471" width="1008" height="50" fill="#111a17"/>
+  <circle cx="126" cy="496" r="9" fill="#b9f227"/>
+  <text x="150" y="504" font-family="monospace" font-size="19" fill="#e6efe8">READ ONLY · NO WALLET CONNECTION · NO AUTOMATIC SPENDING</text>
 </svg>

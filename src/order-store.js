@@ -25,6 +25,17 @@ export function orderStoreConfigured() {
   return Boolean(ORDER_DATABASE_URL);
 }
 
+export async function getOrderStoreHealth() {
+  if (!ORDER_DATABASE_URL) return { configured: false, available: false };
+  try {
+    await initializeOrderStore();
+    await pool.query("SELECT 1");
+    return { configured: true, available: true };
+  } catch {
+    return { configured: true, available: false };
+  }
+}
+
 export function hashAccessToken(value) {
   return sha256(`${ORDER_ACCESS_TOKEN_PEPPER}:${String(value)}`);
 }
@@ -142,6 +153,22 @@ export async function markOrderSettled(settlement) {
   if (!configured) return { stored: false };
 
   return withTransaction(async client => {
+    let repeatBuyer = false;
+    if (settlement.payerAddress) {
+      const previousBuyer = await client.query(
+        `
+          SELECT EXISTS (
+            SELECT 1
+            FROM paid_service_orders
+            WHERE LOWER(payer_address) = LOWER($1)
+              AND settled_at IS NOT NULL
+              AND order_id <> $2
+          ) AS repeat_buyer
+        `,
+        [settlement.payerAddress, settlement.orderId],
+      );
+      repeatBuyer = Boolean(previousBuyer.rows[0]?.repeat_buyer);
+    }
     const result = await client.query(
       `
         UPDATE paid_service_orders
@@ -182,7 +209,7 @@ export async function markOrderSettled(settlement) {
       [settlement.orderId],
     );
 
-    return { stored: true, order: result.rows[0] };
+    return { stored: true, order: result.rows[0], repeatBuyer };
   });
 }
 
@@ -575,6 +602,163 @@ export async function getReviewQueueStats() {
   return { configured: true, ...result.rows[0] };
 }
 
+export async function recordServiceHeartbeat(component, metadata = {}) {
+  const configured = await initializeOrderStore();
+  if (!configured) return false;
+  const name = String(component ?? "").trim().slice(0, 100);
+  if (!name) throw new Error("heartbeat component is required");
+  await pool.query(
+    `
+      INSERT INTO service_heartbeats (component, observed_at, service_version, commit_sha)
+      VALUES ($1, NOW(), $2, $3)
+      ON CONFLICT (component) DO UPDATE SET
+        observed_at = EXCLUDED.observed_at,
+        service_version = EXCLUDED.service_version,
+        commit_sha = EXCLUDED.commit_sha
+    `,
+    [
+      name,
+      optionalDatabaseText(metadata.version, 100),
+      optionalDatabaseText(metadata.commitSha, 100),
+    ],
+  );
+  return true;
+}
+
+export async function getServiceHeartbeat(component, maxAgeSeconds = 30) {
+  const configured = await initializeOrderStore();
+  if (!configured) return { configured: false, available: false };
+  const result = await pool.query(
+    `
+      SELECT observed_at, service_version, commit_sha,
+        observed_at >= NOW() - make_interval(secs => $2::INTEGER) AS available
+      FROM service_heartbeats
+      WHERE component = $1
+    `,
+    [String(component).slice(0, 100), Math.max(1, Math.floor(Number(maxAgeSeconds) || 30))],
+  );
+  if (result.rowCount !== 1) {
+    return { configured: true, available: false };
+  }
+  return {
+    configured: true,
+    available: Boolean(result.rows[0].available),
+    version: result.rows[0].service_version ?? null,
+    commitSha: result.rows[0].commit_sha ?? null,
+  };
+}
+
+export async function storeTelemetryEvent(event) {
+  const configured = await initializeOrderStore();
+  if (!configured) return false;
+  await pool.query(
+    `
+      INSERT INTO telemetry_events (
+        event, observed_at, request_id, route, method, status_code, latency_ms,
+        price_usd, network, facilitator, discovery_source, error_code,
+        buyer_wallet_hash
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+    `,
+    [
+      String(event.event).slice(0, 100),
+      event.timestamp,
+      optionalDatabaseText(event.request_id, 200),
+      optionalDatabaseText(event.route, 500),
+      optionalDatabaseText(event.method, 20),
+      nullableNumber(event.status_code),
+      nullableNumber(event.latency_ms),
+      nullableNumber(event.price_usd),
+      optionalDatabaseText(event.network, 100),
+      optionalDatabaseText(event.facilitator, 500),
+      optionalDatabaseText(event.discovery_source, 100),
+      optionalDatabaseText(event.error_code, 200),
+      optionalDatabaseText(event.buyer_wallet_hash, 64),
+    ],
+  );
+  return true;
+}
+
+export async function getCommercialMetricsSummary() {
+  const configured = await initializeOrderStore();
+  if (!configured) {
+    return {
+      configured: false,
+      generatedAt: new Date().toISOString(),
+      windows: {
+        "7d": emptyMetricsWindow(7),
+        "30d": emptyMetricsWindow(30),
+      },
+    };
+  }
+
+  const windows = {};
+  for (const days of [7, 30]) {
+    const totals = await pool.query(
+      `
+        SELECT
+          COUNT(*) FILTER (WHERE event = 'preflight_inspection_completed')::INTEGER AS inspections,
+          COUNT(*) FILTER (WHERE event = 'payment_challenge_served')::INTEGER AS challenges,
+          COUNT(*) FILTER (WHERE event = 'payment_settled')::INTEGER AS settlements,
+          COUNT(*) FILTER (WHERE event = 'resource_delivered')::INTEGER AS deliveries,
+          COUNT(*) FILTER (WHERE event = 'resource_failed')::INTEGER AS errors,
+          COUNT(DISTINCT buyer_wallet_hash) FILTER (
+            WHERE event = 'payment_settled' AND buyer_wallet_hash IS NOT NULL
+          )::INTEGER AS unique_buyers,
+          COALESCE(SUM(price_usd) FILTER (WHERE event = 'payment_settled'), 0)::NUMERIC AS revenue_usd,
+          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY latency_ms) FILTER (
+            WHERE event = 'preflight_inspection_completed' AND latency_ms IS NOT NULL
+          ) AS latency_p50_ms,
+          PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms) FILTER (
+            WHERE event = 'preflight_inspection_completed' AND latency_ms IS NOT NULL
+          ) AS latency_p95_ms
+        FROM telemetry_events
+        WHERE observed_at >= NOW() - make_interval(days => $1::INTEGER)
+      `,
+      [days],
+    );
+    const recurring = await pool.query(
+      `
+        SELECT COUNT(*)::INTEGER AS recurring_buyers
+        FROM (
+          SELECT buyer_wallet_hash
+          FROM telemetry_events
+          WHERE observed_at >= NOW() - make_interval(days => $1::INTEGER)
+            AND event = 'payment_settled'
+            AND buyer_wallet_hash IS NOT NULL
+          GROUP BY buyer_wallet_hash
+          HAVING COUNT(*) > 1
+        ) buyers
+      `,
+      [days],
+    );
+    const revenue = await pool.query(
+      `
+        SELECT COALESCE(route, 'unknown') AS route,
+          COALESCE(SUM(price_usd), 0)::NUMERIC AS revenue_usd
+        FROM telemetry_events
+        WHERE observed_at >= NOW() - make_interval(days => $1::INTEGER)
+          AND event = 'payment_settled'
+        GROUP BY COALESCE(route, 'unknown')
+        ORDER BY revenue_usd DESC, route ASC
+      `,
+      [days],
+    );
+    windows[`${days}d`] = mapMetricsWindow(
+      days,
+      totals.rows[0],
+      recurring.rows[0],
+      revenue.rows,
+    );
+  }
+
+  return {
+    configured: true,
+    generatedAt: new Date().toISOString(),
+    windows,
+  };
+}
+
 export async function markDeliveryDelivered(deliveryId, httpStatus) {
   const configured = await initializeOrderStore();
   if (!configured) return false;
@@ -791,6 +975,35 @@ async function initializeDatabase() {
     );
     CREATE INDEX IF NOT EXISTS delivery_attempts_pending_idx
       ON delivery_attempts (status, next_attempt_at, created_at);
+
+    CREATE TABLE IF NOT EXISTS service_heartbeats (
+      component TEXT PRIMARY KEY,
+      observed_at TIMESTAMPTZ NOT NULL,
+      service_version TEXT,
+      commit_sha TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS telemetry_events (
+      event_id BIGSERIAL PRIMARY KEY,
+      event TEXT NOT NULL,
+      observed_at TIMESTAMPTZ NOT NULL,
+      request_id TEXT,
+      route TEXT,
+      method TEXT,
+      status_code INTEGER,
+      latency_ms INTEGER,
+      price_usd NUMERIC(20, 6),
+      network TEXT,
+      facilitator TEXT,
+      discovery_source TEXT,
+      error_code TEXT,
+      buyer_wallet_hash TEXT
+    );
+    CREATE INDEX IF NOT EXISTS telemetry_events_observed_idx
+      ON telemetry_events (observed_at DESC, event);
+    CREATE INDEX IF NOT EXISTS telemetry_events_buyer_idx
+      ON telemetry_events (buyer_wallet_hash, observed_at DESC)
+      WHERE buyer_wallet_hash IS NOT NULL;
   `);
 }
 
@@ -871,4 +1084,62 @@ function sanitizedReceipt(receipt) {
 
 function sha256(value) {
   return crypto.createHash("sha256").update(String(value)).digest("hex");
+}
+
+function optionalDatabaseText(value, maxLength) {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text ? text.slice(0, maxLength) : null;
+}
+
+function nullableNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function emptyMetricsWindow(days) {
+  return {
+    days,
+    inspections: 0,
+    challenges: 0,
+    settlements: 0,
+    deliveries: 0,
+    errors: 0,
+    challengeToSettlementPct: null,
+    settlementToDeliveredPct: null,
+    uniqueBuyersApprox: 0,
+    recurringBuyers: 0,
+    revenueUsd: 0,
+    revenueByRoute: [],
+    latencyMs: { p50: null, p95: null },
+  };
+}
+
+function mapMetricsWindow(days, totals, recurring, revenueRows) {
+  const output = emptyMetricsWindow(days);
+  output.inspections = Number(totals.inspections ?? 0);
+  output.challenges = Number(totals.challenges ?? 0);
+  output.settlements = Number(totals.settlements ?? 0);
+  output.deliveries = Number(totals.deliveries ?? 0);
+  output.errors = Number(totals.errors ?? 0);
+  output.challengeToSettlementPct = percentage(output.settlements, output.challenges);
+  output.settlementToDeliveredPct = percentage(output.deliveries, output.settlements);
+  output.uniqueBuyersApprox = Number(totals.unique_buyers ?? 0);
+  output.recurringBuyers = Number(recurring.recurring_buyers ?? 0);
+  output.revenueUsd = Number(totals.revenue_usd ?? 0);
+  output.revenueByRoute = revenueRows.map(row => ({
+    route: row.route,
+    revenueUsd: Number(row.revenue_usd ?? 0),
+  }));
+  output.latencyMs = {
+    p50: totals.latency_p50_ms === null ? null : Math.round(Number(totals.latency_p50_ms)),
+    p95: totals.latency_p95_ms === null ? null : Math.round(Number(totals.latency_p95_ms)),
+  };
+  return output;
+}
+
+function percentage(numerator, denominator) {
+  if (!denominator) return null;
+  return Number(((numerator / denominator) * 100).toFixed(2));
 }

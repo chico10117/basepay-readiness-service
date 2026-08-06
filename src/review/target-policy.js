@@ -8,8 +8,9 @@ export class TargetAccessError extends Error {
   constructor(message, options = {}) {
     super(message);
     this.name = "TargetAccessError";
-    this.code = "TARGET_ACCESS";
+    this.code = options.code ?? "TARGET_ACCESS";
     this.retryable = Boolean(options.retryable);
+    this.statusCode = options.statusCode ?? 400;
   }
 }
 
@@ -51,10 +52,10 @@ export function normalizeReviewTarget(input) {
   return { kind: "https_url", url: url.toString() };
 }
 
-export async function assertPublicUrl(value) {
+export async function assertPublicUrl(value, options = {}) {
   const url = assertUrlNotObviouslyPrivate(value);
 
-  const hostname = url.hostname.toLowerCase();
+  const hostname = normalizedHostname(url);
   if (net.isIP(hostname)) {
     if (isPrivateAddress(hostname)) {
       throw new TargetAccessError("private, loopback, or link-local targets are not allowed");
@@ -68,9 +69,14 @@ export async function assertPublicUrl(value) {
 
   let addresses;
   try {
-    addresses = await dns.lookup(hostname, { all: true, verbatim: true });
+    const lookup = options.lookup ?? dns.lookup.bind(dns);
+    addresses = await lookup(hostname, { all: true, verbatim: true });
   } catch (error) {
-    throw new TargetAccessError(`target DNS lookup failed: ${error.message}`);
+    throw new TargetAccessError(`target DNS lookup failed: ${error.message}`, {
+      code: "TARGET_DNS_FAILED",
+      retryable: true,
+      statusCode: 502,
+    });
   }
 
   if (!addresses.length || addresses.some(address => isPrivateAddress(address.address))) {
@@ -83,7 +89,7 @@ export async function assertPublicUrl(value) {
 export function assertUrlNotObviouslyPrivate(value) {
   const url = value instanceof URL ? value : new URL(String(value));
   validateUrlShape(url);
-  const hostname = url.hostname.toLowerCase();
+  const hostname = normalizedHostname(url);
   if ((net.isIP(hostname) && isPrivateAddress(hostname)) || isBlockedHostname(hostname)) {
     throw new TargetAccessError("private, loopback, or metadata targets are not allowed");
   }
@@ -91,47 +97,110 @@ export function assertUrlNotObviouslyPrivate(value) {
 }
 
 export async function safeFetch(input, init = {}, options = {}) {
-  let current = input instanceof URL ? input.toString() : String(input);
+  const { response } = await safeFetchWithTrace(input, init, options);
+  return response;
+}
+
+export async function safeFetchWithTrace(input, init = {}, options = {}) {
+  let current = input instanceof URL ? new URL(input) : new URL(String(input));
+  let currentInit = cloneRequestInit(init);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const startedAt = Date.now();
+  const redirects = [];
 
   for (let redirect = 0; redirect <= maxRedirects; redirect += 1) {
-    await assertPublicUrl(current);
+    if (options.httpsOnly && current.protocol !== "https:") {
+      throw new TargetAccessError("target and redirect URLs must use HTTPS", {
+        code: "TARGET_PROTOCOL_BLOCKED",
+      });
+    }
+    await assertPublicUrl(current, options);
+    const remainingMs = timeoutMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) {
+      throw new TargetAccessError("target request timed out", {
+        code: "TARGET_TIMEOUT",
+        retryable: true,
+        statusCode: 504,
+      });
+    }
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const timeout = setTimeout(() => controller.abort(), remainingMs);
     try {
-      const response = await fetch(current, {
-        ...init,
+      const response = await fetchImpl(current.toString(), {
+        ...currentInit,
         redirect: "manual",
         signal: controller.signal,
       });
-      if (response.status < 300 || response.status >= 400) return response;
+      if (!isRedirectStatus(response.status)) {
+        return {
+          response,
+          finalUrl: current.toString(),
+          redirects,
+          deadlineAt: startedAt + timeoutMs,
+        };
+      }
 
+      await response.body?.cancel().catch(() => {});
       const location = response.headers.get("location");
       if (!location || redirect === maxRedirects) {
-        throw new TargetAccessError("target redirect chain is invalid or too long");
+        throw new TargetAccessError("target redirect chain is invalid or too long", {
+          code: "TARGET_REDIRECT_BLOCKED",
+        });
       }
-      current = new URL(location, current).toString();
+      const next = new URL(location, current);
+      if (next.origin !== current.origin) {
+        currentInit = {
+          ...currentInit,
+          headers: withoutSensitiveRedirectHeaders(currentInit.headers),
+        };
+      }
+      if (redirectChangesToGet(response.status, currentInit.method)) {
+        currentInit = {
+          ...currentInit,
+          method: "GET",
+          body: undefined,
+          headers: withoutEntityHeaders(currentInit.headers),
+        };
+      }
+      redirects.push({
+        from: current.toString(),
+        to: next.toString(),
+        statusCode: response.status,
+      });
+      current = next;
     } catch (error) {
       if (error instanceof TargetAccessError) throw error;
       if (error.name === "AbortError") {
-        throw new TargetAccessError("target request timed out", { retryable: true });
+        throw new TargetAccessError("target request timed out", {
+          code: "TARGET_TIMEOUT",
+          retryable: true,
+          statusCode: 504,
+        });
       }
       throw new TargetAccessError(`target request failed: ${error.message}`, {
+        code: "TARGET_UNREACHABLE",
         retryable: true,
+        statusCode: 502,
       });
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  throw new TargetAccessError("target redirect chain exceeded the limit");
+  throw new TargetAccessError("target redirect chain exceeded the limit", {
+    code: "TARGET_REDIRECT_BLOCKED",
+  });
 }
 
-export async function readResponseText(response, maxBytes = 64 * 1024) {
+export async function readResponseText(response, maxBytes = 64 * 1024, options = {}) {
   const contentLength = Number(response.headers.get("content-length") ?? "0");
   if (contentLength > maxBytes) {
-    throw new TargetAccessError("target response exceeds the size limit");
+    throw new TargetAccessError("target response exceeds the size limit", {
+      code: "TARGET_RESPONSE_TOO_LARGE",
+      statusCode: 502,
+    });
   }
 
   if (!response.body) return "";
@@ -140,15 +209,23 @@ export async function readResponseText(response, maxBytes = 64 * 1024) {
   let total = 0;
   try {
     while (true) {
-      const next = await reader.read();
+      const next = await readChunk(reader, options.deadlineAt);
       if (next.done) break;
       total += next.value.byteLength;
       if (total > maxBytes) {
         await reader.cancel();
-        throw new TargetAccessError("target response exceeds the size limit");
+        throw new TargetAccessError("target response exceeds the size limit", {
+          code: "TARGET_RESPONSE_TOO_LARGE",
+          statusCode: 502,
+        });
       }
       chunks.push(next.value);
     }
+  } catch (error) {
+    if (error instanceof TargetAccessError && error.code === "TARGET_TIMEOUT") {
+      await reader.cancel().catch(() => {});
+    }
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -210,7 +287,10 @@ function isPrivateAddress(address) {
       (first === 172 && second >= 16 && second <= 31) ||
       (first === 192 && second === 168) ||
       (first === 192 && second === 0) ||
+      (first === 192 && second === 0 && octets[2] === 2) ||
       (first === 198 && second >= 18 && second <= 19) ||
+      (first === 198 && second === 51 && octets[2] === 100) ||
+      (first === 203 && second === 0 && octets[2] === 113) ||
       first >= 224
     );
   }
@@ -219,16 +299,69 @@ function isPrivateAddress(address) {
   return (
     normalized === "::1" ||
     normalized === "::" ||
+    normalized.startsWith("ff") ||
     normalized.startsWith("fc") ||
     normalized.startsWith("fd") ||
     normalized.startsWith("fe8") ||
     normalized.startsWith("fe9") ||
     normalized.startsWith("fea") ||
     normalized.startsWith("feb") ||
-    normalized.startsWith("::ffff:10.") ||
-    normalized.startsWith("::ffff:192.168.") ||
-    normalized.startsWith("::ffff:127.")
+    normalized.startsWith("2001:db8:") ||
+    normalized.startsWith("::ffff:")
   );
+}
+
+function normalizedHostname(url) {
+  const hostname = url.hostname.toLowerCase();
+  return hostname.startsWith("[") && hostname.endsWith("]")
+    ? hostname.slice(1, -1)
+    : hostname;
+}
+
+function isRedirectStatus(status) {
+  return [301, 302, 303, 307, 308].includes(status);
+}
+
+function redirectChangesToGet(status, method) {
+  const normalized = String(method ?? "GET").toUpperCase();
+  return status === 303
+    ? normalized !== "HEAD"
+    : [301, 302].includes(status) && normalized === "POST";
+}
+
+function cloneRequestInit(init) {
+  return {
+    ...init,
+    headers: new Headers(init.headers ?? {}),
+  };
+}
+
+function withoutSensitiveRedirectHeaders(headers) {
+  const copy = new Headers(headers);
+  for (const name of [
+    "authorization",
+    "cookie",
+    "proxy-authorization",
+    "x-api-key",
+    "payment",
+    "payment-signature",
+    "x-payment",
+    "x-402-payment",
+    "x402-payment",
+    "x-x402-signature",
+    "x-x402-timestamp",
+  ]) {
+    copy.delete(name);
+  }
+  return copy;
+}
+
+function withoutEntityHeaders(headers) {
+  const copy = new Headers(headers);
+  for (const name of ["content-encoding", "content-language", "content-length", "content-type"]) {
+    copy.delete(name);
+  }
+  return copy;
 }
 
 function concatChunks(chunks, total) {
@@ -239,4 +372,29 @@ function concatChunks(chunks, total) {
     offset += chunk.byteLength;
   }
   return output;
+}
+
+async function readChunk(reader, deadlineAt) {
+  if (!Number.isFinite(deadlineAt)) return reader.read();
+  const remainingMs = deadlineAt - Date.now();
+  if (remainingMs <= 0) throw targetTimeoutError();
+  let timeout;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(targetTimeoutError()), remainingMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function targetTimeoutError() {
+  return new TargetAccessError("target request timed out", {
+    code: "TARGET_TIMEOUT",
+    retryable: true,
+    statusCode: 504,
+  });
 }

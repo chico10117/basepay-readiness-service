@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "agent-commerce-theme";
+  const STORAGE_KEY = "x402-preflight-theme";
   const THEMES = new Set(["light", "dark"]);
   const systemPreference = window.matchMedia?.("(prefers-color-scheme: dark)");
   const root = document.documentElement;
@@ -84,7 +84,7 @@
 
   function updateThemeColor(theme) {
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.content = theme === "dark" ? "#0b100e" : "#f4f1e8";
+    if (meta) meta.content = theme === "dark" ? "#0c1210" : "#f1efe6";
   }
 
   function capitalize(value) {

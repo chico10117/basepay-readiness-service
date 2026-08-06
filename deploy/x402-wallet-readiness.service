@@ -1,5 +1,5 @@
 [Unit]
-Description=x402 Wallet Readiness API
+Description=x402 Preflight API
 After=network-online.target
 Wants=network-online.target
 
@@ -14,6 +14,7 @@ Environment=X402_PRICE=$2
 Environment=X402_NETWORK=eip155:8453
 Environment=X402_FACILITATOR_URL=https://facilitator.world.fun
 Environment=SETTLEMENT_JOURNAL_DIR=/var/lib/x402-wallet-readiness/settlements
+EnvironmentFile=-/etc/x402-wallet-readiness/runtime.env
 EnvironmentFile=-/etc/x402-wallet-readiness/order-store.env
 StateDirectory=x402-wallet-readiness
 ExecStart=/usr/bin/node /opt/x402-wallet-readiness/src/index.js

@@ -1,16 +1,21 @@
 {
   "name": "base-wallet-readiness-service",
-  "version": "0.12.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "x402-ready Base wallet payment-readiness checker that accepts USDC to a configured receiving wallet.",
+  "description": "Inspect and validate an x402 endpoint before an autonomous agent spends USDC.",
   "scripts": {
     "start": "node src/index.js",
     "worker": "node scripts/run-review-worker.js",
     "reconcile:settlements": "node scripts/reconcile-settlements.js",
     "test:x402-trigger": "node scripts/conditional-x402-payment.js",
-    "check": "for file in public/*.js src/*.js src/review/*.js src/routes/*.js scripts/*.js; do node --check \"$file\"; done",
-    "test": "node --test"
+    "check": "for file in public/*.js src/*.js src/mcp/*.js src/preflight/*.js src/review/*.js src/routes/*.js scripts/*.js; do node --check \"$file\"; done",
+    "test": "node --test",
+    "validate:bazaar": "node scripts/validate-bazaar.js",
+    "verify:discovery": "node scripts/verify-discovery.js",
+    "smoke:public": "node scripts/smoke-public.js",
+    "verify:runtime": "node scripts/verify-runtime.js",
+    "metrics:summary": "node scripts/metrics-summary.js"
   },
   "dependencies": {
     "@coinbase/x402": "^2.1.0",
