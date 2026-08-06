@@ -1,7 +1,8 @@
 # Plan de revisión automática y entrega x402
 
-Estado: implementado y desplegado; rail x402 real de `$2` verificado; pendiente
-únicamente el pedido Quick Review real de `50 USDC`
+Estado: automatización base desplegada; reconciliador automático implementado
+en el repositorio y pendiente de despliegue; rail x402 real de `$2` verificado;
+pendiente el pedido Quick Review real de `50 USDC`
 Última verificación operativa: 2026-08-05
 Repositorio: `x402-wallet-readiness-service`
 Alcance inicial: `Quick Review` e `Integration Triage`
@@ -44,6 +45,16 @@ Implementado en el MVP desplegado:
 - API autenticada de estado, resultado y reporte.
 - Webhooks firmados, idempotentes y con reintentos.
 - Métricas, alertas, backup y runbook operativo en el VPS.
+
+Implementado en el repositorio y pendiente de desplegar:
+
+- Journal local durable del settlement, escrito antes de actualizar PostgreSQL.
+- Reconciliador automático cada 15 segundos con backoff e idempotencia por
+  `order_id` y transaction hash.
+- Estado agregado en `/health`, alerta para jobs atascados en
+  `awaiting_settlement` y comando manual `npm run reconcile:settlements`.
+- El journal guarda únicamente prueba pública del pago; nunca autorizaciones,
+  firmas, tokens de acceso ni claves privadas.
 
 Pendiente fuera de la automatización verificable desde este entorno:
 
@@ -96,7 +107,10 @@ flowchart LR
     API --> Facilitator["Facilitador x402"]
     API --> Orders["paid_service_orders"]
     Facilitator --> Settlement["Settlement confirmado"]
-    Settlement --> Queue["review_jobs: queued"]
+    Settlement --> Journal["Journal durable local"]
+    Journal --> Reconciler["Reconciliador automático"]
+    Reconciler --> Orders
+    Orders --> Queue["review_jobs: queued"]
     Worker["x402 review worker"] --> Queue
     Worker --> Target["Repo público o URL"]
     Worker --> Agent["Motor de revisión"]
@@ -190,17 +204,20 @@ ejemplo commit SHA, URL final después de redirects y tiempos de las probes.
 
 1. Antes del settlement, crear el job como `awaiting_settlement` junto al
    pedido y al hash del token de acceso.
-2. En `onAfterSettle`, registrar el pago y cambiar el job a `queued` dentro de
-   una misma transacción.
-3. En `onSettleFailure`, cambiar el job a `cancelled`.
-4. El worker reclama un job `queued`, incrementa intentos y crea un lease.
-5. El worker renueva el lease mientras trabaja.
-6. Un resultado válido cambia el job a `completed` y crea la entrega.
-7. Una falta de acceso o información cambia el job a `needs_input`.
-8. Un fallo temporal vuelve a `queued` con backoff.
-9. Un fallo definitivo o intentos agotados cambia el job a `failed` y genera
+2. En `onAfterSettle`, guardar primero una prueba mínima del pago en el journal
+   local y después registrar el pago y cambiar el job a `queued` dentro de una
+   misma transacción PostgreSQL.
+3. Si PostgreSQL no responde, el reconciliador reintenta con backoff. Borra la
+   entrada solo después de confirmar la escritura idempotente en la base.
+4. En `onSettleFailure`, cambiar el job a `cancelled`.
+5. El worker reclama un job `queued`, incrementa intentos y crea un lease.
+6. El worker renueva el lease mientras trabaja.
+7. Un resultado válido cambia el job a `completed` y crea la entrega.
+8. Una falta de acceso o información cambia el job a `needs_input`.
+9. Un fallo temporal vuelve a `queued` con backoff.
+10. Un fallo definitivo o intentos agotados cambia el job a `failed` y genera
    una notificación de error.
-10. Un proceso de recuperación devuelve a `queued` cualquier job `processing`
+11. Un proceso de recuperación devuelve a `queued` cualquier job `processing`
     cuyo lease haya expirado.
 
 La semántica será procesamiento al menos una vez con escrituras idempotentes.
@@ -491,6 +508,7 @@ Alertas mínimas:
 src/
   index.js
   order-store.js
+  settlement-reconciler.js
   review/
     job-store.js
     worker.js
@@ -505,6 +523,7 @@ src/
   routes/
     order-results.js
 scripts/
+  reconcile-settlements.js
   run-review-worker.js
 ops/
   review-worker/
@@ -522,6 +541,7 @@ los módulos nuevos y mantener el cambio inicial acotado.
 - [x] Crear tablas, índices y constraints.
 - [x] Crear job `awaiting_settlement` al guardar el intake.
 - [x] Encolar transaccionalmente después del settlement.
+- [x] Añadir journal durable y reconciliación automática del settlement.
 - [x] Cancelar job ante fallo de settlement.
 - [x] Añadir operaciones idempotentes de claim, heartbeat, retry y complete.
 
@@ -584,6 +604,7 @@ y un fallo temporal se recupera sin duplicar el resultado.
 - [x] Activar worker con concurrencia `1`.
 - [x] Ejecutar un pedido sintético sin pago.
 - [x] Ejecutar el smoke test one-shot de `2 USDC` cuando llegue el fondeo exacto.
+- [ ] Desplegar y verificar el reconciliador automático de settlements.
 - [ ] Ejecutar un pedido Quick Review real de `50 USDC` de extremo a extremo.
 - [x] Verificar DB, resultado, Markdown, webhook y restart recovery.
 - [x] Activar alertas y documentar runbook.
@@ -608,6 +629,8 @@ manual.
 ### Integración
 
 - Settlement confirmado crea exactamente un job.
+- Caída de PostgreSQL después del settlement conserva el journal y encola el
+  job al recuperarse, sin duplicarlo.
 - Settlement fallido no ejecuta revisión.
 - Dos workers no procesan el mismo job simultáneamente.
 - Worker muerto recupera job después del lease.
@@ -637,6 +660,10 @@ REVIEW_JOB_LEASE_SECONDS=300
 REVIEW_JOB_MAX_ATTEMPTS=3
 REVIEW_QUEUE_ALERT_SECONDS=60
 REVIEW_FAILED_ALERT_COUNT=1
+SETTLEMENT_JOURNAL_DIR=
+SETTLEMENT_RECONCILE_INTERVAL_MS=15000
+SETTLEMENT_RECONCILE_MAX_BACKOFF_MS=300000
+SETTLEMENT_RECONCILE_ALERT_SECONDS=60
 REVIEW_AGENT_PROVIDER=
 REVIEW_AGENT_MODEL=
 REVIEW_AGENT_API_URL=

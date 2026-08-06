@@ -7,8 +7,9 @@
   "scripts": {
     "start": "node src/index.js",
     "worker": "node scripts/run-review-worker.js",
+    "reconcile:settlements": "node scripts/reconcile-settlements.js",
     "test:x402-trigger": "node scripts/conditional-x402-payment.js",
-    "check": "node --check src/index.js && node --check src/order-store.js && for file in src/review/*.js src/routes/*.js scripts/*.js; do node --check \"$file\"; done",
+    "check": "for file in src/*.js src/review/*.js src/routes/*.js scripts/*.js; do node --check \"$file\"; done",
     "test": "node --test"
   },
   "dependencies": {

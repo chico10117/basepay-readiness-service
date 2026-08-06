@@ -133,9 +133,15 @@ The direct x402 Quick Review and Integration Triage routes persist paid-service
 intakes in PostgreSQL when `ORDER_DATABASE_URL` is configured. The handler
 stores the normalized request after facilitator verification and before it
 returns success, so a database failure prevents settlement. After successful
-x402 settlement, the resource-server hook records the payer and transaction
-hash. Retries are deduplicated with a SHA-256 fingerprint of the payment
-authorization; the authorization itself is never stored.
+x402 settlement, the resource-server hook first writes a minimal settlement
+proof to a local durable journal and then records the payer and transaction
+hash in PostgreSQL. If that database write fails, an in-process reconciler
+replays the journal every 15 seconds with bounded backoff until the same
+idempotent transaction queues the review job. The journal contains only the
+order ID, transaction hash, payer, network, amount, and receiver; it never
+stores the payment authorization, signature, access token, or private key.
+Payment retries are separately deduplicated with a SHA-256 fingerprint of the
+authorization, while the authorization itself is never stored.
 
 Successful settlements now create a durable automated-review job. The VPS
 worker performs read-only inspection of public GitHub repositories or HTTPS
@@ -151,10 +157,21 @@ reported by the alert timer.
 Production runs PostgreSQL privately on the VPS loopback interface. Vercel
 continues to be the public HTTPS entrypoint and forwards requests to the VPS;
 the database is never exposed to Vercel or the public Internet.
+The API service keeps its settlement journal at
+`/var/lib/x402-wallet-readiness/settlements` with directory mode `0700` and
+file mode `0600`. `GET /health` exposes only aggregate journal health, never
+order IDs or transaction hashes. Jobs left in `awaiting_settlement` for more
+than one minute trigger the existing review alert timer.
 
 ```sh
 ORDER_DATABASE_URL=postgresql://x402_orders:password@127.0.0.1:6435/x402_orders
 ORDER_STORE_REQUIRED=true
+```
+
+To force an immediate journal replay during recovery:
+
+```sh
+npm run reconcile:settlements
 ```
 
 Operational files live under `ops/order-db/`. The included systemd timer makes

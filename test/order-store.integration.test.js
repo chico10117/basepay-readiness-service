@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+
+import {
+  journalSettlement,
+  reconcileSettlementJournal,
+} from "../src/settlement-reconciler.js";
 
 const databaseUrl = process.env.TEST_ORDER_DATABASE_URL;
 
@@ -16,6 +24,7 @@ test(
     const orderId = `test-${crypto.randomUUID()}`;
     const accessToken = crypto.randomBytes(32).toString("base64url");
     const acceptedAt = new Date().toISOString();
+    const journalDirectory = await mkdtemp(join(tmpdir(), "x402-settlements-db-"));
 
     try {
       await store.initializeOrderStore();
@@ -44,14 +53,23 @@ test(
         },
         receipt: { orderId, review: { accessToken } },
       });
-      await store.markOrderSettled({
-        orderId,
-        transaction: `0x${crypto.randomBytes(32).toString("hex")}`,
-        payerAddress: "0x0000000000000000000000000000000000000001",
-        network: "eip155:8453",
-        amountAtomic: "50000000",
-        payTo: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
-      });
+      await journalSettlement(
+        {
+          orderId,
+          transaction: `0x${crypto.randomBytes(32).toString("hex")}`,
+          payerAddress: "0x0000000000000000000000000000000000000001",
+          network: "eip155:8453",
+          amountAtomic: "50000000",
+          payTo: "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+        },
+        { directory: journalDirectory },
+      );
+      const reconciliation = await reconcileSettlementJournal(
+        store.markOrderSettled,
+        { directory: journalDirectory, force: true },
+      );
+      assert.equal(reconciliation.reconciled, 1);
+      assert.equal(reconciliation.failed, 0);
       const job = await store.claimNextReviewJob("integration-test", 300);
       assert.equal(job.order_id, orderId);
       const result = {
@@ -106,6 +124,7 @@ test(
       await pool.query("DELETE FROM paid_service_orders WHERE order_id = $1", [orderId]);
       await pool.end();
       await store.closeOrderStore();
+      await rm(journalDirectory, { recursive: true, force: true });
     }
   },
 );

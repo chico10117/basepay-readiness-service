@@ -553,6 +553,8 @@ export async function getReviewQueueStats() {
       (SELECT COUNT(*)::INTEGER FROM delivery_attempts WHERE status IN ('pending', 'sending')) AS pending_deliveries,
       (SELECT COUNT(*)::INTEGER FROM delivery_attempts WHERE status = 'failed') AS failed_deliveries,
       (SELECT MIN(created_at) FROM review_jobs WHERE status = 'queued') AS oldest_queued_at,
+      (SELECT COUNT(*)::INTEGER FROM review_jobs WHERE status = 'awaiting_settlement') AS awaiting_settlement_jobs,
+      (SELECT MIN(created_at) FROM review_jobs WHERE status = 'awaiting_settlement') AS oldest_awaiting_settlement_at,
       (SELECT COUNT(*)::INTEGER FROM review_jobs WHERE status = 'failed') AS failed_jobs,
       (SELECT COUNT(*)::INTEGER FROM paid_service_orders WHERE settled_at IS NOT NULL) AS settled_orders,
       (SELECT COALESCE(SUM((agent_metadata->'usage'->>'total_tokens')::NUMERIC), 0) FROM review_results) AS agent_tokens,

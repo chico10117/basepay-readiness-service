@@ -23,6 +23,13 @@ import {
   orderStoreConfigured,
   saveVerifiedOrder,
 } from "./order-store.js";
+import {
+  acknowledgeSettlement,
+  getSettlementJournalStats,
+  journalSettlement,
+  sanitizeSettlementRecord,
+  startSettlementReconciler,
+} from "./settlement-reconciler.js";
 import { createOrderResultsRouter } from "./routes/order-results.js";
 import { validateCallbackUrl } from "./review/delivery.js";
 import { assertPublicUrl } from "./review/target-policy.js";
@@ -361,8 +368,27 @@ const serviceInfo = {
   },
 };
 
-app.get("/health", (_req, res) => {
-  res.json({ ok: true, network: NETWORK, payTo: PAY_TO });
+app.get("/health", async (_req, res) => {
+  let settlementReconciliation;
+  try {
+    settlementReconciliation = {
+      enabled: orderStoreConfigured(),
+      ...(await getSettlementJournalStats()),
+    };
+  } catch {
+    settlementReconciliation = {
+      enabled: orderStoreConfigured(),
+      configured: true,
+      available: false,
+    };
+  }
+
+  res.json({
+    ok: settlementReconciliation.available !== false,
+    network: NETWORK,
+    payTo: PAY_TO,
+    settlementReconciliation,
+  });
 });
 
 app.get("/manifest", (_req, res) => {
@@ -1460,6 +1486,12 @@ app.listen(PORT, () => {
     `Base wallet readiness service listening on http://localhost:${PORT}`,
   );
   console.log(`x402 network=${NETWORK} price=${PRICE} payTo=${PAY_TO}`);
+  if (orderStoreConfigured()) {
+    startSettlementReconciler({
+      applySettlement: persistStoredServiceSettlement,
+    });
+    console.log("settlement reconciler started");
+  }
   initializeOrderStore()
     .then(configured => {
       console.log(
@@ -2639,20 +2671,65 @@ async function handleStoredServiceOrderSettlement(context) {
     return;
   }
 
-  await retryOrderStoreMutation(
+  let settlement;
+  try {
+    settlement = sanitizeSettlementRecord({
+      orderId: receipt.orderId,
+      transaction,
+      payerAddress:
+        optionalString(context.result?.payer) ??
+        paymentPayloadPayer(context.paymentPayload),
+      network:
+        optionalString(context.result?.network) ??
+        optionalString(context.requirements?.network),
+      amountAtomic:
+        optionalString(context.result?.amount) ??
+        optionalString(context.requirements?.amount),
+      payTo: optionalString(context.requirements?.payTo),
+    });
+  } catch (error) {
+    console.error(
+      `invalid settlement proof for ${receipt.orderId}: ${error.message}`,
+    );
+    return;
+  }
+
+  let journaled = false;
+  try {
+    await journalSettlement(settlement);
+    journaled = true;
+  } catch (error) {
+    console.error(
+      `unable to journal settlement for ${receipt.orderId}: ${error.message}`,
+    );
+  }
+
+  const stored = await retryOrderStoreMutation(
     `record settlement for ${receipt.orderId}`,
-    () =>
-      markOrderSettled({
-        orderId: receipt.orderId,
-        transaction,
-        payerAddress: paymentPayloadPayer(context.paymentPayload),
-        network:
-          optionalString(context.result?.network) ??
-          optionalString(context.requirements?.network),
-        amountAtomic: optionalString(context.requirements?.amount),
-        payTo: optionalString(context.requirements?.payTo),
-      }),
+    () => persistStoredServiceSettlement(settlement),
   );
+
+  if (stored && journaled) {
+    try {
+      await acknowledgeSettlement(settlement);
+    } catch (error) {
+      console.error(
+        `unable to acknowledge settlement journal for ${receipt.orderId}: ${error.message}`,
+      );
+    }
+  } else if (!stored && !journaled) {
+    console.error(
+      `critical settlement recovery gap for ${receipt.orderId}: journal and database writes failed`,
+    );
+  }
+}
+
+async function persistStoredServiceSettlement(settlement) {
+  const result = await markOrderSettled(settlement);
+  if (!result?.stored) {
+    throw new Error("paid service order store is unavailable");
+  }
+  return result;
 }
 
 async function handleStoredServiceOrderSettlementFailure(context) {
@@ -2715,13 +2792,14 @@ async function retryOrderStoreMutation(label, mutation) {
     }
     try {
       await mutation();
-      return;
+      return true;
     } catch (error) {
       lastError = error;
     }
   }
 
   console.error(`unable to ${label}: ${lastError?.message ?? "unknown error"}`);
+  return false;
 }
 
 function serviceOrderDigest(prefix, acceptedAt, request, paymentFingerprint) {
