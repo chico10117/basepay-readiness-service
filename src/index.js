@@ -14,8 +14,13 @@ import { PyrimidResolver } from "@pyrimid/sdk/resolver";
 import { HTTPFacilitatorClient, x402ResourceServer } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { paymentMiddleware } from "@x402/express";
-import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import {
+  bazaarResourceServerExtension,
+  declareDiscoveryExtension,
+} from "@x402/extensions/bazaar";
+import {
+  getOrderStoreHealth,
+  getServiceHeartbeat,
   initializeOrderStore,
   hashAccessToken,
   markOrderSettled,
@@ -30,9 +35,44 @@ import {
   sanitizeSettlementRecord,
   startSettlementReconciler,
 } from "./settlement-reconciler.js";
+import {
+  createMcpOriginMiddleware,
+  createMcpPaidToolValidator,
+  createMcpRouter,
+  createMcpTransportMiddleware,
+  mcpToolName,
+} from "./mcp/server.js";
+import {
+  auditHttpDiscoveryExtension,
+  auditMcpDiscoveryExtension,
+  buildA2ANotImplemented,
+  buildAgentMetadata,
+  buildAiTxt,
+  buildLlmsTxt,
+  buildOpenApiDocument,
+  buildPublicManifest,
+  buildX402Manifest,
+  PRODUCT_DESCRIPTION,
+  PRODUCT_NAME,
+  remediationHttpDiscoveryExtension,
+  remediationMcpDiscoveryExtension,
+} from "./preflight/discovery.js";
+import {
+  canonicalRemediationParams,
+  canonicalRemediationReceipt,
+  createPreflightHandlers,
+  createRemediationAvailabilityMiddleware,
+  sendPreflightError,
+} from "./preflight/http.js";
+import { inspectX402Endpoint } from "./preflight/inspector.js";
 import { createOrderResultsRouter } from "./routes/order-results.js";
 import { validateCallbackUrl } from "./review/delivery.js";
 import { assertPublicUrl } from "./review/target-policy.js";
+import {
+  createRequestContextMiddleware,
+  serviceRuntime,
+} from "./service-runtime.js";
+import { createTelemetry } from "./telemetry.js";
 
 const PAY_TO =
   process.env.PAY_TO ?? "0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9";
@@ -52,6 +92,10 @@ const QUICK_REVIEW_X402_PRICE =
   process.env.QUICK_REVIEW_X402_PRICE ?? "$50";
 const INTEGRATION_TRIAGE_X402_PRICE =
   process.env.INTEGRATION_TRIAGE_X402_PRICE ?? "$100";
+const PREFLIGHT_AUDIT_X402_PRICE =
+  process.env.PREFLIGHT_AUDIT_X402_PRICE ?? "$0.05";
+const REMEDIATION_X402_PRICE =
+  process.env.REMEDIATION_X402_PRICE ?? INTEGRATION_TRIAGE_X402_PRICE;
 const BASE_RPC = process.env.BASE_RPC ?? "https://mainnet.base.org";
 const COINBASE_EXCHANGE_API =
   process.env.COINBASE_EXCHANGE_API ?? "https://api.exchange.coinbase.com";
@@ -105,6 +149,8 @@ const PAID_ROUTE_PREFIXES = [
   "/api/x402/weather/current",
   "/api/x402/services/quick-review",
   "/api/x402/services/integration-triage",
+  "/api/x402/preflight/audit",
+  "/api/x402/preflight/remediation",
 ];
 const PAYMENT_REQUEST_HEADERS = [
   "Authorization",
@@ -161,10 +207,9 @@ const facilitatorClient =
     ? new HTTPFacilitatorClient(coinbaseFacilitator)
     : new HTTPFacilitatorClient({ url: FACILITATOR_URL });
 
-const resourceServer = new x402ResourceServer(facilitatorClient).register(
-  NETWORK,
-  new ExactEvmScheme(),
-);
+const resourceServer = new x402ResourceServer(facilitatorClient)
+  .register(NETWORK, new ExactEvmScheme())
+  .registerExtension(bazaarResourceServerExtension);
 resourceServer
   .onAfterSettle(handleStoredServiceOrderSettlement)
   .onSettleFailure(handleStoredServiceOrderSettlementFailure);
@@ -172,6 +217,8 @@ let resourceServerReady = false;
 let resourceServerInitPromise = null;
 
 const app = express();
+const RUNTIME = serviceRuntime();
+const TELEMETRY = createTelemetry();
 app.set("trust proxy", true);
 if (PUBLIC_URL) {
   app.use((req, _res, next) => {
@@ -180,6 +227,13 @@ if (PUBLIC_URL) {
     next();
   });
 }
+app.use(
+  createRequestContextMiddleware(RUNTIME, {
+    onResponse: (req, res, latencyMs) => {
+      TELEMETRY.onHttpResponse(req, res, latencyMs);
+    },
+  }),
+);
 app.use(
   express.json({
     limit: "64kb",
@@ -190,11 +244,27 @@ app.use(
 );
 app.use(createOrderResultsRouter());
 
+const preflightHandlers = createPreflightHandlers({
+  network: NETWORK,
+  usdcContract: USDC_CONTRACT,
+  onInspection: (req, report) => {
+    TELEMETRY.record("preflight_inspection_completed", {
+      request_id: req.requestId,
+      route: req.path,
+      method: req.method,
+      status_code: 200,
+      latency_ms: report.resource.latencyMs,
+      network: report.payment.network,
+      facilitator: report.payment.facilitator,
+      discovery_source: req.get("x-discovery-source") || null,
+    });
+  },
+});
+
 const serviceInfo = {
-  name: "Agent Commerce Desk",
-  version: "0.12.0",
-  description:
-    "Checks Base wallets for USDC receiving readiness, publishes paid x402 data APIs, and sells fixed-price agent payment, developer-tool, VPS, wallet-risk, and QA implementation work.",
+  name: PRODUCT_NAME,
+  version: RUNTIME.version,
+  description: PRODUCT_DESCRIPTION,
   payTo: PAY_TO,
   acceptedPayment: {
     asset: "native USDC",
@@ -369,34 +439,87 @@ const serviceInfo = {
 };
 
 app.get("/health", async (_req, res) => {
-  let settlementReconciliation;
+  let settlementReconciler;
   try {
-    settlementReconciliation = {
+    settlementReconciler = {
       enabled: orderStoreConfigured(),
       ...(await getSettlementJournalStats()),
     };
   } catch {
-    settlementReconciliation = {
+    settlementReconciler = {
       enabled: orderStoreConfigured(),
       configured: true,
       available: false,
+      pending: 0,
     };
   }
 
+  const database = await getOrderStoreHealth();
+  const reviewWorkerEnabled = process.env.REVIEW_WORKER_ENABLED === "true";
+  let reviewWorker = { enabled: reviewWorkerEnabled, available: false };
+  if (reviewWorkerEnabled && database.available) {
+    const heartbeat = await getServiceHeartbeat(
+      "review-worker",
+      Number(process.env.REVIEW_WORKER_HEALTH_MAX_AGE_SECONDS ?? "30"),
+    ).catch(() => ({ available: false }));
+    reviewWorker = {
+      enabled: true,
+      available: Boolean(heartbeat.available),
+    };
+  }
+
+  const degraded =
+    (database.configured && !database.available) ||
+    (reviewWorker.enabled && !reviewWorker.available) ||
+    settlementReconciler.available === false;
+
   res.json({
-    ok: settlementReconciliation.available !== false,
+    status: degraded ? "degraded" : "ok",
+    service: RUNTIME.service,
+    version: RUNTIME.version,
+    commitSha: RUNTIME.commitSha,
+    deployedAt: RUNTIME.deployedAt,
     network: NETWORK,
-    payTo: PAY_TO,
-    settlementReconciliation,
+    facilitatorMode: USE_CDP_FACILITATOR ? "cdp" : "custom",
+    database,
+    reviewWorker,
+    settlementReconciler: {
+      enabled: settlementReconciler.enabled,
+      available: settlementReconciler.available !== false,
+      pending: Number(settlementReconciler.pending ?? 0),
+    },
   });
 });
 
 app.get("/manifest", (_req, res) => {
-  res.json(serviceInfo);
+  res.json(buildPublicManifest(preflightConfig()));
 });
 
 app.get("/openapi.json", (_req, res) => {
-  res.json(openApiDocument());
+  res.json(buildOpenApiDocument(preflightConfig()));
+});
+
+app.use("/api/preflight/inspect", (req, res, next) => {
+  attachPaidRouteBrowserHeaders(req, res);
+  next();
+});
+
+app.options("/api/preflight/inspect", (_req, res) => {
+  res.status(204).end();
+});
+
+app.post(
+  "/api/preflight/inspect",
+  preflightHandlers.validateInspect,
+  preflightHandlers.inspect,
+);
+
+app.get("/.well-known/agent-card.json", (req, res) => {
+  res.status(404).json(buildA2ANotImplemented(preflightConfig(), req.requestId));
+});
+
+app.get("/.well-known/agent.json", (_req, res) => {
+  res.json(buildAgentMetadata(preflightConfig()));
 });
 
 app.get("/api/800402/preview", (_req, res) => {
@@ -633,7 +756,8 @@ async function previewReadiness(req, res, next) {
   }
 }
 
-app.get("/.well-known/agent-card.json", (_req, res) => {
+app.get("/labs/legacy-agent-card.json", (_req, res) => {
+  res.set("Deprecation", "true");
   res.json({
     name: serviceInfo.name,
     description: serviceInfo.description,
@@ -934,7 +1058,8 @@ app.get("/.well-known/agent-card.json", (_req, res) => {
   });
 });
 
-app.get("/.well-known/agent.json", (_req, res) => {
+app.get("/labs/legacy-agent.json", (_req, res) => {
+  res.set("Deprecation", "true");
   res.json({
     name: serviceInfo.name,
     description:
@@ -1101,15 +1226,15 @@ app.get("/.well-known/agent.json", (_req, res) => {
 });
 
 app.get("/.well-known/x402", (_req, res) => {
-  res.json(x402Manifest());
+  res.json(buildX402Manifest(preflightConfig()));
 });
 
 app.get("/.well-known/x402.json", (_req, res) => {
-  res.json(x402Manifest());
+  res.json(buildX402Manifest(preflightConfig()));
 });
 
 app.get("/.well-known/ai.txt", (_req, res) => {
-  res.type("text/plain").send(aiTxt());
+  res.type("text/plain").send(buildAiTxt(preflightConfig()));
 });
 
 app.get("/.well-known/402index-verify.txt", (_req, res) => {
@@ -1117,7 +1242,7 @@ app.get("/.well-known/402index-verify.txt", (_req, res) => {
 });
 
 app.get("/llms.txt", (_req, res) => {
-  res.type("text/plain").send(llmsTxt());
+  res.type("text/plain").send(buildLlmsTxt(preflightConfig()));
 });
 
 app.get("/wallet-sign", (_req, res) => {
@@ -1142,6 +1267,18 @@ app.get("/favicon.ico", (_req, res) => {
 
 app.use(express.static(PUBLIC_DIR));
 
+app.use(createMcpOriginMiddleware({ baseUrl: baseUrl() }));
+app.use(createMcpTransportMiddleware());
+app.use(createMcpPaidToolValidator({
+  network: NETWORK,
+  remediationAvailable: async () => (await getOrderStoreHealth()).available,
+}));
+
+app.options("/mcp", (req, res) => {
+  attachPaidRouteBrowserHeaders(req, res);
+  res.status(204).end();
+});
+
 app.use((req, res, next) => {
   if (!isPaidRoutePath(req.path)) {
     next();
@@ -1161,6 +1298,14 @@ app.use((req, res, next) => {
 
 app.use("/api/x402/services/integration-triage", validatePaidServiceIntake);
 app.use("/api/x402/services/quick-review", validatePaidServiceIntake);
+app.use("/api/x402/preflight/audit", preflightHandlers.validateAudit);
+app.use("/api/x402/preflight/remediation", preflightHandlers.validateRemediation);
+app.use(
+  "/api/x402/preflight/remediation",
+  createRemediationAvailabilityMiddleware(
+    async () => (await getOrderStoreHealth()).available,
+  ),
+);
 
 app.use(async (req, res, next) => {
   if (!isPaidRoutePath(req.path)) {
@@ -1169,12 +1314,37 @@ app.use(async (req, res, next) => {
   }
 
   try {
+    const routePrice = paidRoutePrice(req.path);
+    res.locals.telemetry = {
+      price_usd: priceUsd(routePrice),
+      network: NETWORK,
+      facilitator: ACTIVE_FACILITATOR_URL,
+    };
+    if (hasPaymentAttemptHeader(req)) {
+      TELEMETRY.record("payment_verification_started", {
+        request_id: req.requestId,
+        route: req.path,
+        method: req.method,
+        price_usd: priceUsd(routePrice),
+        network: NETWORK,
+        facilitator: ACTIVE_FACILITATOR_URL,
+      });
+    }
     await initializeResourceServer();
     next();
   } catch (error) {
     resourceServerInitPromise = null;
     attachPaidRouteBrowserHeaders(req, res);
     console.warn(`x402 facilitator initialization failed: ${error.message}`);
+    if (req.path.startsWith("/api/x402/preflight/")) {
+      const unavailable = new Error("x402 facilitator is temporarily unavailable");
+      unavailable.code = "FACILITATOR_UNAVAILABLE";
+      unavailable.statusCode = 502;
+      unavailable.retryable = true;
+      unavailable.retryAfterMs = 10_000;
+      sendPreflightError(res, req, unavailable);
+      return;
+    }
     res.status(502).json({
       error: "x402 facilitator is temporarily unavailable; retry shortly",
     });
@@ -1182,6 +1352,34 @@ app.use(async (req, res, next) => {
 });
 
 const paidRouteConfigs = withHeadPaymentRoutes({
+      "POST /api/x402/preflight/audit": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: PREFLIGHT_AUDIT_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Deeply validate an unfamiliar x402 endpoint before an agent spends USDC: requirements schema, policy, discovery, redirects, CORS, cache, and operational signals.",
+        mimeType: "application/json",
+        extensions: auditHttpDiscoveryExtension(preflightConfig()),
+      },
+      "POST /api/x402/preflight/remediation": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: REMEDIATION_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Create a durable x402 remediation order after a failed or risky preflight audit.",
+        mimeType: "application/json",
+        extensions: remediationHttpDiscoveryExtension(preflightConfig()),
+      },
       "GET /api/readiness": {
         accepts: [
           {
@@ -1363,6 +1561,103 @@ const paidRouteConfigs = withHeadPaymentRoutes({
       },
     });
 
+const mcpAuditPaymentMiddleware = paymentMiddleware(
+  {
+    "POST /mcp": {
+      accepts: [{
+        scheme: "exact",
+        price: PREFLIGHT_AUDIT_X402_PRICE,
+        network: NETWORK,
+        payTo: PAY_TO,
+      }],
+      resource: `${baseUrl()}/mcp#audit_x402_endpoint`,
+      description:
+        "MCP audit_x402_endpoint: deep read-only validation before an agent spends USDC.",
+      mimeType: "application/json",
+      extensions: auditMcpDiscoveryExtension(preflightConfig()),
+    },
+  },
+  resourceServer,
+  undefined,
+  undefined,
+  false,
+);
+
+const mcpRemediationPaymentMiddleware = paymentMiddleware(
+  {
+    "POST /mcp": {
+      accepts: [{
+        scheme: "exact",
+        price: REMEDIATION_X402_PRICE,
+        network: NETWORK,
+        payTo: PAY_TO,
+      }],
+      resource: `${baseUrl()}/mcp#order_x402_remediation`,
+      description:
+        "MCP order_x402_remediation: create a durable remediation intake after an x402 audit.",
+      mimeType: "application/json",
+      extensions: remediationMcpDiscoveryExtension(preflightConfig()),
+    },
+  },
+  resourceServer,
+  undefined,
+  undefined,
+  false,
+);
+
+app.use(async (req, res, next) => {
+  const toolName = mcpToolName(req);
+  if (!["audit_x402_endpoint", "order_x402_remediation"].includes(toolName)) {
+    next();
+    return;
+  }
+
+  attachPaidRouteBrowserHeaders(req, res);
+  forcePaidRouteFinalHeaders(req, res);
+  const price = toolName === "audit_x402_endpoint"
+    ? PREFLIGHT_AUDIT_X402_PRICE
+    : REMEDIATION_X402_PRICE;
+  res.locals.telemetry = {
+    price_usd: priceUsd(price),
+    network: NETWORK,
+    facilitator: ACTIVE_FACILITATOR_URL,
+  };
+  if (hasPaymentAttemptHeader(req)) {
+    TELEMETRY.record("payment_verification_started", {
+      request_id: req.requestId,
+      route: "/mcp",
+      method: req.method,
+      price_usd: priceUsd(price),
+      network: NETWORK,
+      facilitator: ACTIVE_FACILITATOR_URL,
+    });
+  }
+
+  try {
+    await initializeResourceServer();
+    const middleware = toolName === "audit_x402_endpoint"
+      ? mcpAuditPaymentMiddleware
+      : mcpRemediationPaymentMiddleware;
+    await middleware(req, res, next);
+  } catch (error) {
+    resourceServerInitPromise = null;
+    res.status(502).json({
+      jsonrpc: "2.0",
+      id: req.body?.id ?? null,
+      error: {
+        code: -32002,
+        message: "x402 facilitator is temporarily unavailable",
+        data: {
+          code: "FACILITATOR_UNAVAILABLE",
+          retryable: true,
+          retryAfterMs: 10000,
+          requestId: req.requestId,
+        },
+      },
+    });
+  }
+});
+
 app.use(
   paymentMiddleware(
     paidRouteConfigs,
@@ -1371,6 +1666,35 @@ app.use(
     undefined,
     false,
   ),
+);
+
+app.post("/api/x402/preflight/audit", preflightHandlers.audit);
+
+app.post("/api/x402/preflight/remediation", async (req, res, next) => {
+  try {
+    res.json(await buildCanonicalRemediationOrder(req, req.remediationInput));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.use(
+  createMcpRouter({
+    version: RUNTIME.version,
+    network: NETWORK,
+    inspect: (args, req) => runMcpPreflight(args, req, "inspect"),
+    audit: (args, req) => runMcpPreflight(args, req, "audit"),
+    remediate: (args, req) => buildCanonicalRemediationOrder(req, args),
+    onToolsListed: req => {
+      TELEMETRY.record("mcp_tools_listed", {
+        request_id: req.requestId,
+        route: "/mcp",
+        method: req.method,
+        status_code: 200,
+        discovery_source: req.get("x-discovery-source") || null,
+      });
+    },
+  }),
 );
 
 app.get("/api/readiness", async (req, res, next) => {
@@ -1472,6 +1796,10 @@ app.post("/api/x402/services/quick-review", async (req, res, next) => {
 });
 
 app.use((error, req, res, _next) => {
+  if (req.path.startsWith("/api/preflight/") || req.path.startsWith("/api/x402/preflight/")) {
+    sendPreflightError(res, req, error);
+    return;
+  }
   const status = error.statusCode ?? error.status ?? 500;
   if (status === 402 || isPaidRoutePath(req.path)) {
     attachPaidRouteBrowserHeaders(req, res);
@@ -1481,29 +1809,40 @@ app.use((error, req, res, _next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(
-    `Base wallet readiness service listening on http://localhost:${PORT}`,
-  );
-  console.log(`x402 network=${NETWORK} price=${PRICE} payTo=${PAY_TO}`);
-  if (orderStoreConfigured()) {
-    startSettlementReconciler({
-      applySettlement: persistStoredServiceSettlement,
-    });
-    console.log("settlement reconciler started");
-  }
-  initializeOrderStore()
-    .then(configured => {
-      console.log(
-        configured
-          ? "paid service order store ready"
-          : "paid service order store disabled",
-      );
-    })
-    .catch(error => {
-      console.error(`paid service order store unavailable: ${error.message}`);
-    });
-});
+export { app };
+
+export function startServer(port = PORT) {
+  const server = app.listen(port, () => {
+    const address = server.address();
+    const actualPort = typeof address === "object" && address ? address.port : port;
+    console.log(`${PRODUCT_NAME} listening on http://localhost:${actualPort}`);
+    console.log(
+      `x402 network=${NETWORK} auditPrice=${PREFLIGHT_AUDIT_X402_PRICE} facilitatorMode=${USE_CDP_FACILITATOR ? "cdp" : "custom"}`,
+    );
+    if (orderStoreConfigured()) {
+      startSettlementReconciler({
+        applySettlement: persistStoredServiceSettlement,
+      });
+      console.log("settlement reconciler started");
+    }
+    initializeOrderStore()
+      .then(configured => {
+        console.log(
+          configured
+            ? "paid service order store ready"
+            : "paid service order store disabled",
+        );
+      })
+      .catch(error => {
+        console.error(`paid service order store unavailable: ${error.message}`);
+      });
+  });
+  return server;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  startServer();
+}
 
 function requireMarketApiKey(req) {
   if (!MARKET_FEED_API_KEY) return;
@@ -1532,6 +1871,84 @@ function isPaidRoutePath(pathname) {
   return PAID_ROUTE_PREFIXES.some(
     prefix => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
+}
+
+function paidRoutePrice(pathname) {
+  if (pathname.startsWith("/api/x402/preflight/audit")) {
+    return PREFLIGHT_AUDIT_X402_PRICE;
+  }
+  if (pathname.startsWith("/api/x402/preflight/remediation")) {
+    return REMEDIATION_X402_PRICE;
+  }
+  if (pathname.startsWith("/api/x402/services/quick-review")) {
+    return QUICK_REVIEW_X402_PRICE;
+  }
+  if (pathname.startsWith("/api/x402/services/integration-triage")) {
+    return INTEGRATION_TRIAGE_X402_PRICE;
+  }
+  if (pathname.startsWith("/api/x402/market/crypto-snapshot")) {
+    return MARKET_SNAPSHOT_X402_PRICE;
+  }
+  if (pathname.startsWith("/api/x402/market/ohlcv")) {
+    return MARKET_OHLCV_X402_PRICE;
+  }
+  if (pathname.startsWith("/api/x402/dev/repo-snapshot")) {
+    return DEV_REPO_SNAPSHOT_X402_PRICE;
+  }
+  if (pathname.startsWith("/api/x402/weather/current")) {
+    return WEATHER_CURRENT_X402_PRICE;
+  }
+  return PRICE;
+}
+
+function preflightConfig() {
+  return {
+    technicalName: "base-wallet-readiness-service",
+    baseUrl: baseUrl(),
+    version: RUNTIME.version,
+    network: NETWORK,
+    asset: USDC_CONTRACT,
+    payTo: PAY_TO,
+    facilitator: ACTIVE_FACILITATOR_URL,
+    auditPrice: PREFLIGHT_AUDIT_X402_PRICE,
+    remediationPrice: REMEDIATION_X402_PRICE,
+  };
+}
+
+async function runMcpPreflight(args, req, profile) {
+  const report = await inspectX402Endpoint(args, {
+    profile,
+    requestId: req.requestId,
+    defaultNetwork: NETWORK,
+    usdcContract: USDC_CONTRACT,
+  });
+  TELEMETRY.record("preflight_inspection_completed", {
+    request_id: req.requestId,
+    route: "/mcp",
+    method: req.method,
+    status_code: 200,
+    latency_ms: report.resource.latencyMs,
+    price_usd: profile === "audit" ? priceUsd(PREFLIGHT_AUDIT_X402_PRICE) : null,
+    network: report.payment.network,
+    facilitator: report.payment.facilitator,
+    discovery_source: req.get("x-discovery-source") || null,
+  });
+  return report;
+}
+
+async function buildCanonicalRemediationOrder(req, args) {
+  req.body = canonicalRemediationParams(args);
+  const receipt = await buildAndStoreServiceOrder(req, buildRemediationOrder);
+  TELEMETRY.record("remediation_order_created", {
+    request_id: req.requestId,
+    route: req.path,
+    method: req.method,
+    status_code: 200,
+    price_usd: priceUsd(REMEDIATION_X402_PRICE),
+    network: NETWORK,
+    facilitator: ACTIVE_FACILITATOR_URL,
+  });
+  return canonicalRemediationReceipt(receipt);
 }
 
 function withHeadPaymentRoutes(routes) {
@@ -2653,6 +3070,9 @@ async function buildAndStoreServiceOrder(req, builder) {
       "paid order storage is temporarily unavailable; payment was not settled",
     );
     publicError.statusCode = 503;
+    publicError.code = "ORDER_STORE_UNAVAILABLE";
+    publicError.retryable = true;
+    publicError.retryAfterMs = 10_000;
     throw publicError;
   }
 
@@ -2660,6 +3080,22 @@ async function buildAndStoreServiceOrder(req, builder) {
 }
 
 async function handleStoredServiceOrderSettlement(context) {
+  const payerAddress =
+    optionalString(context.result?.payer) ??
+    paymentPayloadPayer(context.paymentPayload);
+  TELEMETRY.record("payment_settled", {
+    request_id: context.transportContext?.requestId,
+    route: settlementRoute(context),
+    method: context.transportContext?.adapter?.getMethod?.(),
+    status_code: 200,
+    price_usd: atomicUsdcPrice(context.requirements?.amount),
+    network:
+      optionalString(context.result?.network) ??
+      optionalString(context.requirements?.network),
+    facilitator: ACTIVE_FACILITATOR_URL,
+    buyer_wallet_hash: TELEMETRY.buyerWalletHash(payerAddress),
+  });
+
   const receipt = storedServiceOrderReceipt(context);
   if (!receipt) return;
 
@@ -2677,8 +3113,7 @@ async function handleStoredServiceOrderSettlement(context) {
       orderId: receipt.orderId,
       transaction,
       payerAddress:
-        optionalString(context.result?.payer) ??
-        paymentPayloadPayer(context.paymentPayload),
+        payerAddress,
       network:
         optionalString(context.result?.network) ??
         optionalString(context.requirements?.network),
@@ -2729,7 +3164,33 @@ async function persistStoredServiceSettlement(settlement) {
   if (!result?.stored) {
     throw new Error("paid service order store is unavailable");
   }
+  if (result.repeatBuyer) {
+    TELEMETRY.record("repeat_buyer_detected", {
+      route: "/api/x402/preflight/remediation",
+      network: settlement.network,
+      buyer_wallet_hash: TELEMETRY.buyerWalletHash(settlement.payerAddress),
+    });
+  }
   return result;
+}
+
+function settlementRoute(context) {
+  return (
+    context.transportContext?.adapter?.getPath?.() ??
+    context.transportContext?.path ??
+    "unknown"
+  );
+}
+
+function atomicUsdcPrice(value) {
+  const text = String(value ?? "");
+  if (!/^\d+$/.test(text)) return null;
+  try {
+    const atomic = BigInt(text);
+    return Number(atomic / 1_000_000n) + Number(atomic % 1_000_000n) / 1_000_000;
+  } catch {
+    return null;
+  }
 }
 
 async function handleStoredServiceOrderSettlementFailure(context) {
@@ -2922,6 +3383,14 @@ function buildIntegrationTriageOrder(query, paymentFingerprint = "") {
         "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
     },
   };
+}
+
+function buildRemediationOrder(query, paymentFingerprint = "") {
+  const receipt = buildIntegrationTriageOrder(query, paymentFingerprint);
+  receipt.payment.expectedAmountAtomic = x402Accept(REMEDIATION_X402_PRICE).amount;
+  receipt.payment.expectedAmountUsd = priceUsd(REMEDIATION_X402_PRICE);
+  receipt.provider.paidEndpoint = `${baseUrl()}/api/x402/preflight/remediation`;
+  return receipt;
 }
 
 function buildTools402QuickReviewIntake(query) {
@@ -3916,435 +4385,6 @@ function x402Manifest() {
   };
 }
 
-function openApiDocument() {
-  return {
-    openapi: "3.1.0",
-    info: {
-      title: serviceInfo.name,
-      version: serviceInfo.version,
-      description: serviceInfo.description,
-      "x-guidance":
-        "Use GET endpoints with x402 exact payment on Base mainnet USDC. Runtime 402 responses are authoritative for payTo, asset, amount, and facilitator details.",
-    },
-    servers: [{ url: baseUrl() }],
-    "x-agentcash-provenance": {
-      ownershipProofs: [],
-    },
-    "x-agentcash-guidance": {
-      llmsTxtUrl: `${baseUrl()}/llms.txt`,
-    },
-    paths: {
-      "/api/readiness": {
-        get: paidOpenApiOperation({
-          operationId: "getPaidWalletReadiness",
-          summary: "Paid Base wallet readiness report",
-          description:
-            "Returns ETH balance, native USDC balance, transaction count, token transfers, and contract status for a Base wallet.",
-          price: PRICE,
-          parameters: [addressQueryParameter()],
-          outputExample: readinessBazaarOutput().example,
-        }),
-      },
-      "/api/agent-commerce-receipt": {
-        get: paidOpenApiOperation({
-          operationId: "getPaidAgentCommerceReceipt",
-          summary: "Paid agent commerce readiness receipt",
-          description:
-            "Returns an 800402-style agent commerce receipt combining identity metadata, x402 payment terms, and wallet-readiness evidence.",
-          price: PRICE,
-          parameters: [addressQueryParameter()],
-          outputExample: receiptBazaarOutput().example,
-        }),
-      },
-      "/api/x402/market/crypto-snapshot": {
-        get: paidOpenApiOperation({
-          operationId: "getPaidCryptoSnapshot",
-          summary: "Paid top crypto market snapshot",
-          description:
-            "Returns ranked crypto market data with price, market cap, 24h volume/change, and Coinbase bid/ask where available.",
-          price: MARKET_SNAPSHOT_X402_PRICE,
-          parameters: [
-            {
-              name: "limit",
-              in: "query",
-              required: false,
-              schema: { type: "integer", minimum: 1, maximum: 50, default: 50 },
-              description: "Number of ranked assets to return.",
-            },
-          ],
-          outputExample: bazaarOutputExample(marketSnapshotDiscoveryExtension()),
-        }),
-      },
-      "/api/x402/market/ohlcv": {
-        get: paidOpenApiOperation({
-          operationId: "getPaidMarketOhlcv",
-          summary: "Paid daily OHLCV market feed",
-          description:
-            "Returns Coinbase Exchange daily OHLCV candles for supported USD pairs.",
-          price: MARKET_OHLCV_X402_PRICE,
-          parameters: [
-            {
-              name: "pairs",
-              in: "query",
-              required: false,
-              schema: {
-                type: "string",
-                default: "BTC-USD,ETH-USD",
-                example: "BTC-USD,ETH-USD",
-              },
-              description:
-                "Comma-separated Coinbase pairs. Supported: BTC-USD, ETH-USD, SOL-USD.",
-            },
-            {
-              name: "days",
-              in: "query",
-              required: false,
-              schema: { type: "integer", minimum: 1, maximum: 365, default: 365 },
-            },
-          ],
-          outputExample: bazaarOutputExample(marketOhlcvDiscoveryExtension()),
-        }),
-      },
-      "/api/x402/dev/repo-snapshot": {
-        get: paidOpenApiOperation({
-          operationId: "getPaidRepoSnapshot",
-          summary: "Paid GitHub repo intelligence snapshot",
-          description:
-            "Returns repository metadata, language breakdown, recent commits, latest release, and agent-scoping signals for a public GitHub repository.",
-          price: DEV_REPO_SNAPSHOT_X402_PRICE,
-          parameters: [
-            {
-              name: "repo",
-              in: "query",
-              required: true,
-              schema: {
-                type: "string",
-                pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
-                example: "vercel/next.js",
-              },
-              description: "Public GitHub repository slug.",
-            },
-          ],
-          outputExample: bazaarOutputExample(repoSnapshotDiscoveryExtension()),
-        }),
-      },
-      "/api/x402/weather/current": {
-        get: paidOpenApiOperation({
-          operationId: "getPaidCurrentWeather",
-          summary: "Paid current weather forecast snapshot",
-          description:
-            "Returns current weather and a short daily forecast for a WGS84 latitude/longitude pair using Open-Meteo public forecast data.",
-          price: WEATHER_CURRENT_X402_PRICE,
-          parameters: [
-            {
-              name: "latitude",
-              in: "query",
-              required: true,
-              schema: { type: "number", minimum: -90, maximum: 90, example: 37.7749 },
-            },
-            {
-              name: "longitude",
-              in: "query",
-              required: true,
-              schema: { type: "number", minimum: -180, maximum: 180, example: -122.4194 },
-            },
-            {
-              name: "forecast_days",
-              in: "query",
-              required: false,
-              schema: { type: "integer", minimum: 1, maximum: 7, default: 3 },
-            },
-          ],
-          outputExample: bazaarOutputExample(weatherCurrentDiscoveryExtension()),
-        }),
-      },
-      "/api/x402/services/quick-review": {
-        get: paidOpenApiOperation({
-          operationId: "getPaidQuickReview",
-          summary: "Paid Base USDC/x402 quick review",
-          description:
-            "Accepts a paid quick-review intake for one Base USDC/x402 endpoint, marketplace listing, webhook, or payment challenge and returns an order receipt with 12h delivery instructions.",
-          price: QUICK_REVIEW_X402_PRICE,
-          parameters: integrationTriageOpenApiParameters(),
-          outputExample: bazaarOutputExample(
-            integrationTriageDiscoveryExtension({
-              service: "Base USDC x402 Quick Review",
-              price: QUICK_REVIEW_X402_PRICE,
-              sla: "12h from paid intake",
-              goal: "Verify the x402 payment challenge and identify the next patch.",
-            }),
-          ),
-        }),
-        post: paidOpenApiOperation({
-          operationId: "postPaidQuickReview",
-          summary: "Paid Base USDC/x402 quick review",
-          description:
-            "Accepts a paid JSON quick-review intake for one Base USDC/x402 endpoint, marketplace listing, webhook, or payment challenge and returns an order receipt with 12h delivery instructions.",
-          price: QUICK_REVIEW_X402_PRICE,
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: integrationTriageInputSchema(),
-              },
-            },
-          },
-          outputExample: bazaarOutputExample(
-            integrationTriageDiscoveryExtension({
-              method: "POST",
-              service: "Base USDC x402 Quick Review",
-              price: QUICK_REVIEW_X402_PRICE,
-              sla: "12h from paid intake",
-              goal: "Verify the x402 payment challenge and identify the next patch.",
-            }),
-          ),
-        }),
-      },
-      "/api/x402/services/integration-triage": {
-        get: paidOpenApiOperation({
-          operationId: "getPaidIntegrationTriage",
-          summary: "Paid Base USDC/x402 integration triage",
-          description:
-            "Accepts a paid triage intake for a Base USDC/x402 endpoint, marketplace listing, webhook, or receipt verifier and returns an order receipt with 24h delivery instructions.",
-          price: INTEGRATION_TRIAGE_X402_PRICE,
-          parameters: integrationTriageOpenApiParameters(),
-          outputExample: bazaarOutputExample(integrationTriageDiscoveryExtension()),
-        }),
-        post: paidOpenApiOperation({
-          operationId: "postPaidIntegrationTriage",
-          summary: "Paid Base USDC/x402 integration triage",
-          description:
-            "Accepts a paid JSON triage intake for a Base USDC/x402 endpoint, marketplace listing, webhook, or receipt verifier and returns an order receipt with 24h delivery instructions.",
-          price: INTEGRATION_TRIAGE_X402_PRICE,
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: integrationTriageInputSchema(),
-              },
-            },
-          },
-          outputExample: bazaarOutputExample(
-            integrationTriageDiscoveryExtension({ method: "POST" }),
-          ),
-        }),
-      },
-    },
-  };
-}
-
-function paidOpenApiOperation({
-  operationId,
-  summary,
-  description,
-  price,
-  parameters = [],
-  requestBody,
-  outputExample,
-}) {
-  return {
-    operationId,
-    summary,
-    description,
-    parameters,
-    ...(requestBody ? { requestBody } : {}),
-    security: [],
-    "x-payment-info": {
-      price: {
-        mode: "fixed",
-        currency: "USD",
-        amount: priceUsd(price).toFixed(2),
-      },
-      protocols: [{ x402: {} }],
-      network: NETWORK,
-      asset: USDC_CONTRACT,
-      payTo: PAY_TO,
-      facilitator: ACTIVE_FACILITATOR_URL,
-    },
-    responses: {
-      200: {
-        description: "Paid JSON response after a valid x402 payment.",
-        content: {
-          "application/json": {
-            schema: { type: "object", additionalProperties: true },
-            example: outputExample,
-          },
-        },
-      },
-      402: {
-        description: "x402 payment challenge.",
-        content: {
-          "application/json": {
-            schema: { type: "object", additionalProperties: true },
-          },
-        },
-      },
-    },
-  };
-}
-
-function addressQueryParameter() {
-  return {
-    name: "address",
-    in: "query",
-    required: true,
-    schema: {
-      type: "string",
-      pattern: "^0x[a-fA-F0-9]{40}$",
-      example: SAMPLE_ADDRESS,
-    },
-    description: "EVM wallet address on Base.",
-  };
-}
-
-function integrationTriageOpenApiParameters() {
-  return [
-    {
-      name: "repository_or_url",
-      in: "query",
-      required: true,
-      schema: { type: "string", maxLength: 500 },
-      description: "GitHub repo, deployment URL, API docs, or failing endpoint.",
-    },
-    {
-      name: "goal",
-      in: "query",
-      required: true,
-      schema: { type: "string", maxLength: 800 },
-      description: "What should work when the triage is complete.",
-    },
-    {
-      name: "contact",
-      in: "query",
-      required: false,
-      schema: { type: "string", maxLength: 300 },
-      description: "Public GitHub handle, email alias, or other buyer contact.",
-    },
-    {
-      name: "constraints",
-      in: "query",
-      required: false,
-      schema: { type: "string", maxLength: 1000 },
-      description: "Deployment, wallet, security, or deadline constraints.",
-    },
-    {
-      name: "callback_url",
-      in: "query",
-      required: false,
-      schema: { type: "string", format: "uri", maxLength: 2000 },
-      description: "HTTPS webhook URL for completion notifications.",
-    },
-    {
-      name: "response_format",
-      in: "query",
-      required: false,
-      schema: { type: "string", enum: ["json", "markdown", "both"], default: "both" },
-      description: "Preferred result format.",
-    },
-    {
-      name: "language",
-      in: "query",
-      required: false,
-      schema: { type: "string", maxLength: 20, default: "en" },
-      description: "Preferred report language.",
-    },
-  ];
-}
-
-function bazaarOutputExample(extension) {
-  return extension?.bazaar?.info?.output?.example ?? {};
-}
-
-function llmsTxt() {
-  const sampleAddress = SAMPLE_ADDRESS;
-  return `# ${serviceInfo.name}
-
-${serviceInfo.description}
-
-Base URL: ${baseUrl()}
-Payment rail: x402 exact payments, native USDC on Base (${NETWORK})
-Receiving wallet: ${PAY_TO}
-Default paid API price: ${PRICE}
-Facilitator: ${ACTIVE_FACILITATOR_URL}
-
-## Free discovery endpoints
-
-- GET ${baseUrl()}/manifest
-- GET ${baseUrl()}/.well-known/agent-card.json
-- GET ${baseUrl()}/.well-known/agent.json
-- GET ${baseUrl()}/.well-known/x402
-- GET ${baseUrl()}/.well-known/x402.json
-- GET ${baseUrl()}/llms.txt
-- GET ${baseUrl()}/api/800402/preview
-- GET ${baseUrl()}/api/preview?address=${sampleAddress}
-- GET ${baseUrl()}/api/market/crypto-snapshot?limit=50
-- GET ${baseUrl()}/api/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
-- GET ${baseUrl()}/api/dev/repo-snapshot?repo=vercel/next.js
-- GET ${baseUrl()}/api/weather/current?latitude=37.7749&longitude=-122.4194
-- GET ${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3
-- GET ${baseUrl()}/api/the402/services
-- GET ${baseUrl()}/.well-known/the402.json
-- GET ${baseUrl()}/api/the402/webhook
-- GET ${baseUrl()}/open-frame
-- GET ${baseUrl()}/xmtp-bounty-dm
-
-## Paid x402 endpoints
-
-- GET ${baseUrl()}/api/readiness/${sampleAddress}
-- GET ${baseUrl()}/api/agent-commerce-receipt/${sampleAddress}
-- GET ${baseUrl()}/api/x402/market/crypto-snapshot?limit=50
-- GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365
-- GET ${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js
-- GET ${baseUrl()}/api/x402/weather/current?latitude=37.7749&longitude=-122.4194
-- GET ${baseUrl()}/api/x402/services/quick-review?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Verify%20the%20x402%20payment%20challenge%20and%20identify%20the%20next%20patch
-- POST ${baseUrl()}/api/x402/services/quick-review
-- GET ${baseUrl()}/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable
-- POST ${baseUrl()}/api/x402/services/integration-triage
-- GET ${baseUrl()}/api/x402/orders/<order-id> (Authorization: Bearer <access-token>)
-- GET ${baseUrl()}/api/x402/orders/<order-id>/result (Authorization: Bearer <access-token>)
-- GET ${baseUrl()}/api/x402/orders/<order-id>/report.md (Authorization: Bearer <access-token>)
-
-## the402 provider webhook
-
-- POST ${baseUrl()}/api/the402/webhook
-
-Configure THE402_WEBHOOK_SECRET and THE402_API_KEY after provider onboarding.
-The webhook auto-fulfills instant data API jobs and accepts manual x402/Base
-USDC implementation triage jobs without storing wallet private keys.
-
-Use the x402 manifest for exact payment requirements before calling paid endpoints.
-`;
-}
-
-function aiTxt() {
-  return `# Agent Commerce Desk
-
-Description: ${serviceInfo.description}
-Base URL: ${baseUrl()}
-Agent card: ${baseUrl()}/.well-known/agent-card.json
-x402 manifest: ${baseUrl()}/.well-known/x402.json
-OpenAPI: ${baseUrl()}/openapi.json
-Payment rail: native USDC on Base via x402 exact payments
-USDC contract: ${USDC_CONTRACT}
-Network: ${NETWORK}
-Payout wallet: ${PAY_TO}
-Facilitator: ${ACTIVE_FACILITATOR_URL}
-
-## Paid services
-
-- Base wallet readiness report: GET ${baseUrl()}/api/readiness/${SAMPLE_ADDRESS} (${PRICE})
-- Agent commerce receipt: GET ${baseUrl()}/api/agent-commerce-receipt/${SAMPLE_ADDRESS} (${PRICE})
-- Crypto market snapshot: GET ${baseUrl()}/api/x402/market/crypto-snapshot?limit=50 (${MARKET_SNAPSHOT_X402_PRICE})
-- Daily crypto OHLCV feed: GET ${baseUrl()}/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365 (${MARKET_OHLCV_X402_PRICE})
-- GitHub repo intelligence snapshot: GET ${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js (${DEV_REPO_SNAPSHOT_X402_PRICE})
-- Current weather snapshot: GET ${baseUrl()}/api/x402/weather/current?latitude=37.7749&longitude=-122.4194 (${WEATHER_CURRENT_X402_PRICE})
-- Quick x402 readback: POST ${baseUrl()}/api/x402/services/quick-review (${QUICK_REVIEW_X402_PRICE})
-- Fixed-price x402 integration triage: POST ${baseUrl()}/api/x402/services/integration-triage (${INTEGRATION_TRIAGE_X402_PRICE})
-
-Use the x402 manifest for exact payment requirements before calling paid endpoints.
-`;
-}
-
 function readinessDiscoveryExtension(options = {}) {
   return walletAddressDiscoveryExtension({
     ...options,
@@ -4741,42 +4781,26 @@ function baseUrl() {
   return (PUBLIC_URL?.toString() ?? "http://localhost:4021").replace(/\/$/, "");
 }
 
-function integrationTriageOrderUrl(root = baseUrl()) {
-  const url = new URL(`${root}/api/x402/services/integration-triage`);
-  url.searchParams.set("repository_or_url", "https://github.com/example/project");
-  url.searchParams.set(
-    "goal",
-    "Make the x402 Base USDC endpoint browser-agent readable and ready for marketplace listing.",
-  );
-  url.searchParams.set("contact", "github:@buyer");
-  url.searchParams.set(
-    "constraints",
-    "No production writes without approval.",
-  );
-  return url.toString();
-}
-
 function openFrameHtml(options = {}) {
   const root = baseUrl();
   const frameUrl = `${root}/open-frame`;
   const imageUrl = `${root}/open-frame.svg`;
-  const previewUrl =
-    `${root}/api/preview?address=${encodeURIComponent(SAMPLE_ADDRESS)}`;
-  const orderUrl = integrationTriageOrderUrl(root);
+  const previewUrl = `${root}/#inspector`;
+  const orderUrl = `${root}/#capabilities-title`;
   const issueUrl =
     "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml";
-  const signerUrl = `${root}/wallet-sign`;
+  const signerUrl = `${root}/openapi.json`;
   const refreshedCopy = options.refreshed
-    ? "Frame refreshed. The target wallet remains the published Base USDC payout address."
-    : "Open-Frames compatible proof for Base USDC wallet readiness and x402 service discovery.";
+    ? "Frame refreshed. Inspect the live x402 challenge before presenting payment credentials."
+    : "Read-only x402 endpoint inspection before an autonomous agent spends USDC.";
 
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Agent Commerce Desk Open Frame</title>
-    <meta property="og:title" content="Agent Commerce Desk" />
+    <title>x402 Preflight Open Frame</title>
+    <meta property="og:title" content="x402 Preflight" />
     <meta property="og:description" content="${escapeHtml(refreshedCopy)}" />
     <meta property="og:image" content="${imageUrl}" />
     <meta property="of:version" content="vNext" />
@@ -4785,17 +4809,17 @@ function openFrameHtml(options = {}) {
     <meta property="of:accepts:anonymous" content="1.0" />
     <meta property="of:image" content="${imageUrl}" />
     <meta property="of:image:aspect_ratio" content="1.91:1" />
-    <meta property="of:image:alt" content="Agent Commerce Desk frame for Base USDC wallet readiness and x402 APIs." />
+    <meta property="of:image:alt" content="x402 Preflight frame for read-only endpoint inspection before payment." />
     <meta property="of:post_url" content="${frameUrl}" />
     <meta property="of:button:1" content="Refresh proof" />
     <meta property="of:button:1:action" content="post" />
-    <meta property="of:button:2" content="Free preview" />
+    <meta property="of:button:2" content="Free inspect" />
     <meta property="of:button:2:action" content="link" />
     <meta property="of:button:2:target" content="${previewUrl}" />
-    <meta property="of:button:3" content="Pay $100" />
+    <meta property="of:button:3" content="Three tools" />
     <meta property="of:button:3:action" content="link" />
     <meta property="of:button:3:target" content="${orderUrl}" />
-    <meta property="of:button:4" content="Wallet signer" />
+    <meta property="of:button:4" content="OpenAPI" />
     <meta property="of:button:4:action" content="link" />
     <meta property="of:button:4:target" content="${signerUrl}" />
     <meta property="fc:frame" content="vNext" />
@@ -4804,13 +4828,13 @@ function openFrameHtml(options = {}) {
     <meta property="fc:frame:post_url" content="${frameUrl}" />
     <meta property="fc:frame:button:1" content="Refresh proof" />
     <meta property="fc:frame:button:1:action" content="post" />
-    <meta property="fc:frame:button:2" content="Free preview" />
+    <meta property="fc:frame:button:2" content="Free inspect" />
     <meta property="fc:frame:button:2:action" content="link" />
     <meta property="fc:frame:button:2:target" content="${previewUrl}" />
-    <meta property="fc:frame:button:3" content="Pay $100" />
+    <meta property="fc:frame:button:3" content="Three tools" />
     <meta property="fc:frame:button:3:action" content="link" />
     <meta property="fc:frame:button:3:target" content="${orderUrl}" />
-    <meta property="fc:frame:button:4" content="Wallet signer" />
+    <meta property="fc:frame:button:4" content="OpenAPI" />
     <meta property="fc:frame:button:4:action" content="link" />
     <meta property="fc:frame:button:4:target" content="${signerUrl}" />
     <style>
@@ -4820,11 +4844,10 @@ function openFrameHtml(options = {}) {
   </head>
   <body>
     <main>
-      <h1>Agent Commerce Desk Open Frame</h1>
+      <h1>x402 Preflight Open Frame</h1>
       <p>${escapeHtml(refreshedCopy)}</p>
-      <p>Receiving wallet: <code>${PAY_TO}</code></p>
-      <p><a href="${previewUrl}">Open the wallet readiness preview</a></p>
-      <p><a href="${orderUrl}">Start the $100 x402 integration triage order</a></p>
+      <p><a href="${previewUrl}">Inspect an x402 endpoint without payment credentials</a></p>
+      <p><a href="${orderUrl}">Review the three canonical capabilities</a></p>
       <p><a href="${issueUrl}">Add non-secret GitHub context after payment</a></p>
     </main>
   </body>

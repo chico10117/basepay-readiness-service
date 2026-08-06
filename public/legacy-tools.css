@@ -1,0 +1,307 @@
+.legacy-tool-page {
+  min-height: 100vh;
+  font-family: var(--font-mono);
+}
+
+.legacy-tool-page .shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: var(--space-5);
+  width: min(1240px, calc(100vw - 32px));
+  min-height: calc(100vh - 32px);
+  margin: var(--space-4) auto;
+}
+
+.legacy-tool-page .shell > * {
+  min-width: 0;
+}
+
+.legacy-tool-page .workbench,
+.legacy-tool-page .ledger {
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--paper-raised) 96%, transparent);
+  box-shadow: var(--shadow-hard);
+}
+
+.legacy-tool-page .workbench {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+  padding: clamp(22px, 4vw, 44px);
+}
+
+.legacy-tool-page .workbench-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.legacy-tool-page .headline {
+  max-width: 760px;
+}
+
+.legacy-tool-page .kicker {
+  margin: 0 0 var(--space-3);
+  color: var(--cobalt);
+  font-size: var(--step--1);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.legacy-tool-page h1 {
+  max-width: none;
+  margin: 0;
+  font-size: clamp(2.625rem, 8vw, 5.375rem);
+  font-weight: 800;
+  letter-spacing: -0.055em;
+  line-height: 0.95;
+}
+
+.legacy-tool-page .dek {
+  max-width: 700px;
+  margin: var(--space-5) 0 0;
+  color: var(--muted);
+  font-size: var(--step-1);
+  line-height: 1.5;
+}
+
+.legacy-tool-page .problem {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.legacy-tool-page .problem > div {
+  min-width: 0;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line-strong);
+}
+
+.legacy-tool-page .problem p:last-child {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.legacy-tool-page .section-label,
+.legacy-tool-page label {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.legacy-tool-page .section-label {
+  margin: 0 0 var(--space-2);
+  color: var(--cobalt);
+}
+
+.legacy-tool-page .wallet-address,
+.legacy-tool-page code {
+  overflow-wrap: anywhere;
+}
+
+.legacy-tool-page .checker {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.legacy-tool-page .signer-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.legacy-tool-page .button-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.legacy-tool-page input,
+.legacy-tool-page select,
+.legacy-tool-page textarea,
+.legacy-tool-page button {
+  min-height: 48px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-small);
+  color: var(--ink);
+  font: inherit;
+}
+
+.legacy-tool-page input,
+.legacy-tool-page select,
+.legacy-tool-page textarea {
+  width: 100%;
+  padding: 0 var(--space-4);
+  background: var(--paper);
+}
+
+.legacy-tool-page textarea {
+  min-height: 230px;
+  padding-block: var(--space-4);
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.legacy-tool-page button {
+  padding-inline: var(--space-4);
+  cursor: pointer;
+  background: var(--signal);
+  color: var(--signal-ink);
+  font-weight: 800;
+  transition:
+    transform var(--motion-fast) ease-out,
+    box-shadow var(--motion-fast) ease-out;
+}
+
+.legacy-tool-page button:hover,
+.legacy-tool-page .order-link:hover {
+  box-shadow: 4px 4px 0 var(--ink);
+  transform: translate(-2px, -2px);
+}
+
+.legacy-tool-page button:active,
+.legacy-tool-page .order-link:active {
+  box-shadow: none;
+  transform: none;
+}
+
+.legacy-tool-page button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  transform: none;
+}
+
+.legacy-tool-page .secondary-button,
+.legacy-tool-page .secondary-link {
+  background: var(--cobalt);
+  color: var(--cobalt-ink);
+}
+
+.legacy-tool-page .result {
+  min-height: 280px;
+  border: 1px solid var(--line-strong);
+  background: var(--terminal);
+  color: var(--terminal-ink);
+}
+
+.legacy-tool-page .signer-result {
+  min-height: 100%;
+}
+
+.legacy-tool-page .dm-result {
+  min-height: 150px;
+}
+
+.legacy-tool-page .status-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid #3c4942;
+  color: var(--signal);
+}
+
+.legacy-tool-page .status-line.error {
+  color: var(--danger);
+}
+
+.legacy-tool-page .status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.legacy-tool-page pre {
+  margin: 0;
+  padding: var(--space-4);
+  overflow: auto;
+  color: inherit;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.legacy-tool-page .ledger {
+  display: grid;
+  align-content: start;
+  gap: var(--space-5);
+  padding: var(--space-5);
+}
+
+.legacy-tool-page .order-link {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-small);
+  background: var(--signal);
+  color: var(--signal-ink);
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+  transition:
+    transform var(--motion-fast) ease-out,
+    box-shadow var(--motion-fast) ease-out;
+}
+
+.legacy-tool-page .order-link.secondary-link {
+  background: var(--cobalt);
+  color: var(--cobalt-ink);
+}
+
+.legacy-tool-page .receipt {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+
+.legacy-tool-page .receipt p {
+  margin: 0;
+  color: var(--cobalt);
+  font-weight: 800;
+}
+
+.legacy-tool-page .receipt span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.legacy-tool-page .receipt code {
+  color: var(--danger);
+  font-size: var(--step--1);
+}
+
+@media (max-width: 860px) {
+  .legacy-tool-page .shell,
+  .legacy-tool-page .problem,
+  .legacy-tool-page .button-row,
+  .legacy-tool-page .signer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .legacy-tool-page h1 {
+    font-size: 2.625rem;
+  }
+
+  .legacy-tool-page .dek {
+    max-width: 100%;
+    font-size: var(--step-0);
+  }
+}
+
+@media (min-width: 861px) and (max-width: 1120px) {
+  .legacy-tool-page .shell,
+  .legacy-tool-page .signer-grid {
+    grid-template-columns: 1fr;
+  }
+}
