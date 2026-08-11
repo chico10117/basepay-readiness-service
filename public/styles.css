@@ -729,6 +729,102 @@ input:invalid:not(:placeholder-shown) {
   color: var(--muted);
 }
 
+.engagement-frame {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.72fr) minmax(0, 1.28fr);
+  border: 1px solid var(--ink);
+  background: var(--paper-raised);
+  box-shadow: var(--shadow-hard);
+}
+
+.engagement-price-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  padding: var(--space-7);
+  background: var(--cobalt);
+  color: var(--cobalt-ink);
+}
+
+.engagement-price-panel .eyebrow {
+  color: inherit;
+  opacity: 0.78;
+}
+
+.engagement-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  margin: var(--space-7) 0 var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--step-3);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.06em;
+  line-height: 0.95;
+}
+
+.engagement-price span {
+  font-size: var(--step--1);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.engagement-rail {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  font-weight: 600;
+}
+
+.engagement-contract {
+  min-width: 0;
+  padding: var(--space-7);
+}
+
+.engagement-contract h2 {
+  max-width: 20ch;
+  margin: 0;
+  font-size: var(--step-2);
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+}
+
+.engagement-dek {
+  max-width: 62ch;
+  margin: var(--space-4) 0 0;
+  color: var(--muted);
+}
+
+.engagement-terms {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--space-6);
+  margin: var(--space-6) 0;
+  border-top: 1px solid var(--line-strong);
+}
+
+.engagement-terms div {
+  padding-block: var(--space-4);
+  border-bottom: 1px dotted var(--line);
+}
+
+.engagement-terms dt {
+  color: var(--cobalt);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.engagement-terms dd {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+}
+
 .article-index {
   display: block;
   color: var(--cobalt);
@@ -882,6 +978,10 @@ footer {
   .trust-grid .section-heading {
     grid-column: 1 / -1;
   }
+
+  .engagement-frame {
+    grid-template-columns: minmax(240px, 0.58fr) minmax(0, 1.42fr);
+  }
 }
 
 @media (max-width: 760px) {
@@ -964,6 +1064,20 @@ footer {
   .trust-grid,
   .integration-grid {
     grid-template-columns: 1fr;
+  }
+
+  .engagement-frame,
+  .engagement-terms {
+    grid-template-columns: 1fr;
+  }
+
+  .engagement-price-panel,
+  .engagement-contract {
+    padding: var(--space-6);
+  }
+
+  .engagement-price {
+    margin-block: var(--space-5) var(--space-3);
   }
 
   .integration-grid > div {
