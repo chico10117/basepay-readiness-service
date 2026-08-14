@@ -1,0 +1,84 @@
+services:
+  lnd:
+    image: lightninglabs/lnd:v0.21.1-beta
+    container_name: l402-lnd
+    restart: unless-stopped
+    command:
+      - --configfile=/etc/l402-lnd/lnd.conf
+    ports:
+      - "9735:9735"
+      - "127.0.0.1:11009:10009"
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - /var/lib/l402-lnd:/root/.lnd
+      - /etc/l402-lnd/lnd.conf:/etc/l402-lnd/lnd.conf:ro
+      - /etc/l402-lnd/wallet-password:/run/secrets/lnd_wallet_password:ro
+    networks:
+      - l402_internal
+    healthcheck:
+      test: ["CMD", "lncli", "--network=mainnet", "getinfo"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  aperture:
+    image: lightninglabs/aperture:v0.5.0
+    container_name: l402-aperture
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        token="$$(tr -d '\r\n' < /run/secrets/l402_backend_token)"
+        price="$${L402_REPO_SCAN_PRICE_SATS}"
+        case "$$token" in ''|*[!0-9a-f]*) echo "invalid backend token" >&2; exit 1;; esac
+        [ "$${#token}" -eq 64 ] || { echo "invalid backend token length" >&2; exit 1; }
+        case "$$price" in ''|*[!0-9]*) echo "invalid L402 price" >&2; exit 1;; esac
+        [ "$$price" -ge 1 ] && [ "$$price" -le 100000 ] || { echo "L402 price out of range" >&2; exit 1; }
+        sed \
+          -e "s/__L402_BACKEND_TOKEN__/$$token/g" \
+          -e "s/__L402_PRICE_SATS__/$$price/g" \
+          /etc/l402-aperture/aperture.yaml.template \
+          > /root/.aperture/aperture.yaml
+        chmod 0600 /root/.aperture/aperture.yaml
+        exec aperture --configfile=/root/.aperture/aperture.yaml
+    environment:
+      L402_REPO_SCAN_PRICE_SATS: ${L402_REPO_SCAN_PRICE_SATS:-50}
+    depends_on:
+      lnd:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    secrets:
+      - l402_backend_token
+    volumes:
+      - ./aperture.yaml.template:/etc/l402-aperture/aperture.yaml.template:ro
+      - /etc/l402-aperture/lnd:/etc/l402-aperture/lnd:ro
+      - /var/lib/l402-aperture:/root/.aperture
+    networks:
+      - traefik_proxy
+      - l402_internal
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "traefik_proxy"
+      traefik.http.middlewares.l402-redirect.redirectscheme.scheme: "https"
+      traefik.http.middlewares.l402-redirect.redirectscheme.permanent: "true"
+      traefik.http.routers.l402-insecure.entrypoints: "web"
+      traefik.http.routers.l402-insecure.middlewares: "l402-redirect"
+      traefik.http.routers.l402-insecure.rule: "Host(`l402.chikocorp.com`)"
+      traefik.http.routers.l402.entrypoints: "websecure"
+      traefik.http.routers.l402.rule: "Host(`l402.chikocorp.com`)"
+      traefik.http.routers.l402.tls: "true"
+      traefik.http.routers.l402.tls.certresolver: "leresolver"
+      traefik.http.services.l402.loadbalancer.server.port: "8081"
+
+secrets:
+  l402_backend_token:
+    file: /etc/l402-aperture/backend-token
+
+networks:
+  traefik_proxy:
+    external: true
+  l402_internal:
+    driver: bridge

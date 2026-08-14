@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f1efe6" />
+    <meta
+      name="description"
+      content="A sanitized, illustrative x402 payment-security QA packet showing the evidence and acceptance boundary delivered in a fixed-price engagement."
+    />
+    <title>Sample QA packet — x402 Preflight</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="masthead">
+      <a class="brand" href="/" aria-label="x402 Preflight home">
+        <span class="brand-mark" aria-hidden="true">402</span>
+        <span>x402 Preflight</span>
+      </a>
+      <nav class="nav-links" aria-label="Report navigation">
+        <a href="#matrix">Matrix</a>
+        <a href="#finding">Finding</a>
+        <a href="#acceptance">Acceptance</a>
+      </nav>
+      <button
+        class="theme-toggle"
+        type="button"
+        data-theme-toggle
+        aria-pressed="false"
+        aria-label="Color theme: light. Switch to dark mode."
+      >
+        <span class="theme-toggle-swatch" aria-hidden="true"></span>
+        <span data-theme-label>Light mode</span>
+      </button>
+    </header>
+
+    <main id="main" class="sample-report">
+      <section class="sample-hero" aria-labelledby="sample-title">
+        <div>
+          <p class="eyebrow">Sanitized sample · packet 000</p>
+          <h1 id="sample-title">A payment path should be boring to approve.</h1>
+          <p class="hero-dek">
+            This illustrative packet shows the decision, evidence, regression
+            coverage, and commercial boundary delivered in a fixed-price x402
+            payment-security engagement.
+          </p>
+          <p class="sample-disclaimer">
+            <strong>Not a client result.</strong> Targets, identifiers, outcomes,
+            and findings below are synthetic. No production system or customer
+            is represented.
+          </p>
+        </div>
+
+        <aside class="verdict-board" aria-label="Illustrative report verdict">
+          <div class="verdict-board-head">
+            <span>EXAMPLE VERDICT</span>
+            <span>REV A</span>
+          </div>
+          <div class="verdict-word">HOLD</div>
+          <p>Two payment-boundary invariants require remediation before merge.</p>
+          <dl>
+            <div><dt>High</dt><dd>2</dd></div>
+            <div><dt>Medium</dt><dd>1</dd></div>
+            <div><dt>Pass</dt><dd>9</dd></div>
+          </dl>
+        </aside>
+      </section>
+
+      <section class="report-scope section-shell" aria-labelledby="scope-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">01 / boundary</p>
+          <h2 id="scope-title">The contract is fixed before testing starts</h2>
+        </div>
+        <dl class="scope-ledger">
+          <div>
+            <dt>Target</dt>
+            <dd>Synthetic TypeScript x402 client at a buyer-supplied commit</dd>
+          </div>
+          <div>
+            <dt>Surface</dt>
+            <dd>Challenge parsing, authorization binding, retry, and settlement</dd>
+          </div>
+          <div>
+            <dt>Price</dt>
+            <dd>150 USDC on Base · prepayment or escrow preferred</dd>
+          </div>
+          <div>
+            <dt>Clock</dt>
+            <dd>48 hours after written scope and payment confirmation</dd>
+          </div>
+          <div>
+            <dt>Acceptance</dt>
+            <dd>Reproduce findings, pass named regression tests, acknowledge delivery</dd>
+          </div>
+          <div>
+            <dt>Outputs</dt>
+            <dd>Decision memo, evidence matrix, tests, focused patch, merge recommendation</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="report-matrix section-shell" id="matrix" aria-labelledby="matrix-title">
+        <div class="section-heading">
+          <p class="eyebrow">02 / evidence</p>
+          <h2 id="matrix-title">Every decision maps to a named invariant</h2>
+          <p>
+            The real packet pins each row to a clean-checkout command, test
+            name, observed result, and relevant source location.
+          </p>
+        </div>
+        <div class="matrix-scroll" tabindex="0" aria-label="Illustrative payment invariant matrix">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Invariant</th>
+                <th scope="col">Expected behavior</th>
+                <th scope="col">Example result</th>
+                <th scope="col">Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Challenge authority</th>
+                <td>Final origin cannot change the approved payment tuple</td>
+                <td><span class="result result-high">High</span></td>
+                <td><code>redirect-authority.test.ts</code></td>
+              </tr>
+              <tr>
+                <th scope="row">Payee binding</th>
+                <td><code>payTo</code> remains byte-for-byte bound after approval</td>
+                <td><span class="result result-high">High</span></td>
+                <td><code>authorization-binding.test.ts</code></td>
+              </tr>
+              <tr>
+                <th scope="row">Amount and asset</th>
+                <td>Amount, asset, and network cannot drift between attempts</td>
+                <td><span class="result result-pass">Pass</span></td>
+                <td><code>payment-tuple.test.ts</code></td>
+              </tr>
+              <tr>
+                <th scope="row">Replay</th>
+                <td>An authorization is never reused across resource requests</td>
+                <td><span class="result result-medium">Medium</span></td>
+                <td><code>replay-window.test.ts</code></td>
+              </tr>
+              <tr>
+                <th scope="row">No-payment path</th>
+                <td>Non-402 failures do not trigger signing or retry</td>
+                <td><span class="result result-pass">Pass</span></td>
+                <td><code>payment-trigger.test.ts</code></td>
+              </tr>
+              <tr>
+                <th scope="row">Budget ceiling</th>
+                <td>Per-request and daily caps fail closed before signing</td>
+                <td><span class="result result-pass">Pass</span></td>
+                <td><code>budget-policy.test.ts</code></td>
+              </tr>
+              <tr>
+                <th scope="row">Duplicate settlement</th>
+                <td>Timeout recovery cannot settle the same intent twice</td>
+                <td><span class="result result-pass">Pass</span></td>
+                <td><code>settlement-idempotency.test.ts</code></td>
+              </tr>
+              <tr>
+                <th scope="row">Protected body</th>
+                <td>Paid content is exposed only after verified settlement</td>
+                <td><span class="result result-pass">Pass</span></td>
+                <td><code>delivery-gate.test.ts</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="matrix-note">Sample shows 8 of 12 illustrative rows.</p>
+      </section>
+
+      <section class="sample-finding section-shell" id="finding" aria-labelledby="finding-title">
+        <div class="finding-number" aria-hidden="true">H-01</div>
+        <article>
+          <header>
+            <div>
+              <p class="eyebrow">Worked example · high severity</p>
+              <h2 id="finding-title">Cross-origin redirect can rebind the approved payee</h2>
+            </div>
+            <span class="finding-state">MERGE BLOCKER</span>
+          </header>
+
+          <div class="finding-grid">
+            <div>
+              <h3>Observed sequence</h3>
+              <ol>
+                <li>The client receives a valid 402 challenge from origin A.</li>
+                <li>The user policy approves its complete payment tuple.</li>
+                <li>A 307 response sends the retry to controlled origin B.</li>
+                <li>The retry path rebuilds authorization from B instead of rejecting the authority change.</li>
+              </ol>
+            </div>
+            <div>
+              <h3>Security invariant</h3>
+              <p>
+                Scheme, authority, resource identity, network, asset, amount,
+                payee, and fee ceiling must remain bound to the exact tuple the
+                policy approved. Any drift aborts before signing.
+              </p>
+            </div>
+          </div>
+
+          <div class="repro-strip">
+            <span>Clean-checkout reproduction</span>
+            <code>npm test -- redirect-authority.test.ts</code>
+            <strong>Expected before patch: 1 failing invariant</strong>
+          </div>
+
+          <div class="remediation-note">
+            <h3>Focused remediation</h3>
+            <p>
+              Freeze the normalized approval tuple before the first signed
+              request. Reject redirects that change authority or any payment
+              field, and add a negative regression proving the signer is never
+              called after drift is detected.
+            </p>
+          </div>
+        </article>
+      </section>
+
+      <section class="acceptance section-shell" id="acceptance" aria-labelledby="acceptance-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">03 / handoff</p>
+          <h2 id="acceptance-title">Delivery is a reproducible state, not a document drop</h2>
+        </div>
+        <div class="acceptance-grid">
+          <ol class="acceptance-list">
+            <li><span>01</span>Buyer checks out the pinned target revision.</li>
+            <li><span>02</span>Named reproduction fails before the focused patch.</li>
+            <li><span>03</span>Regression suite passes after the patch.</li>
+            <li><span>04</span>Decision memo states merge, hold, or residual risk.</li>
+            <li><span>05</span>Buyer acknowledges the agreed acceptance criteria.</li>
+          </ol>
+          <aside class="delivery-card">
+            <p class="eyebrow">Commission this packet</p>
+            <strong>100–150 USDC</strong>
+            <p>
+              Exact repository, version, failure matrix, acceptance checks,
+              payment rail, and timing are agreed in writing before substantial work.
+            </p>
+            <a
+              class="button button-primary"
+              href="https://github.com/chico10117/basepay-readiness-service/issues/2"
+            >
+              Open the fixed-price intake
+            </a>
+            <a class="back-link" href="/">Return to x402 Preflight</a>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>x402 Preflight · sample packet 000</span>
+      <span>Illustrative data · no client represented</span>
+    </footer>
+  </body>
+</html>

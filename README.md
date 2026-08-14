@@ -30,6 +30,32 @@ manifest, and agent metadata. Existing wallet, market, weather, repository,
 marketplace, and helper routes remain available under the manifest's
 `labs` section.
 
+## Bitcoin Lightning / L402 Seller
+
+The service also contains a gateway-only repository opportunity scanner for
+coding agents:
+
+```text
+GET or POST https://l402.chikocorp.com/api/l402/repo-opportunity-scan
+```
+
+Lightning Labs Aperture presents the public L402 challenge and then forwards a
+private gateway credential to this backend. Direct backend requests fail
+closed when the credential is absent, so the public Node/Vercel route cannot
+bypass the Lightning paywall. The deterministic report ranks public GitHub
+issues, detects open-PR competition and hardware risk, and treats payout words
+as unverified until an authorized payer and amount are explicit.
+
+Free machine-readable discovery lives at:
+
+```text
+https://l402.chikocorp.com/.well-known/l402.json
+```
+
+Production setup, invoice-only LND permissions, and no-payment verification
+are documented in [deploy/l402/README.md](./deploy/l402/README.md). Wallet
+seeds, passwords, admin macaroons, and backend tokens must remain outside Git.
+
 ## Local Development
 
 Requires Node.js 20 or newer.
