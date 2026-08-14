@@ -106,8 +106,18 @@ deployment. It remains a future way to remove channel management.
 
 ## Start the gateway
 
-The VPS already provides the external `traefik_proxy` network and DNS for
-`l402.chikocorp.com`.
+The VPS already provides the external `traefik_proxy` network. Before public
+verification, add this DNS record without changing the apex, `www`, or mail
+records:
+
+```text
+Type: A
+Host: l402
+Target: 145.79.2.245
+```
+
+Wait until `l402.chikocorp.com` resolves to that address from a public resolver;
+Traefik can then obtain the TLS certificate automatically.
 
 ```sh
 sudo install -d -m 0700 /var/lib/l402-aperture
