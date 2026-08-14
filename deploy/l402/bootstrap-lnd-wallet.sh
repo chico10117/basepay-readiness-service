@@ -75,12 +75,16 @@ if [[ ! -s "${lnd_wallet_db}" ]]; then
     "${seed_response}" >/dev/null
 
   wallet_password_b64="$(base64 -w 0 < "${wallet_password_file}")"
-  jq --arg wallet_password "${wallet_password_b64}" \
+  jq -n --arg wallet_password "${wallet_password_b64}" \
     --slurpfile seed "${seed_response}" \
     '{
       wallet_password: $wallet_password,
       cipher_seed_mnemonic: $seed[0].cipher_seed_mnemonic
     }' > "${init_request}"
+  jq -e '
+    (.wallet_password | @base64d | length) >= 8 and
+    (.cipher_seed_mnemonic | length) == 24
+  ' "${init_request}" >/dev/null
 
   curl --silent --show-error --fail \
     --cacert "${lnd_tls_cert}" \
