@@ -65,6 +65,11 @@ import {
   sendPreflightError,
 } from "./preflight/http.js";
 import { inspectX402Endpoint } from "./preflight/inspector.js";
+import {
+  buildRepoOpportunityScan,
+  createL402BackendRateLimit,
+  createL402GatewayGuard,
+} from "./l402/repo-opportunity-scan.js";
 import { createOrderResultsRouter } from "./routes/order-results.js";
 import { validateCallbackUrl } from "./review/delivery.js";
 import { assertPublicUrl } from "./review/target-policy.js";
@@ -104,6 +109,27 @@ const OPEN_METEO_API =
   process.env.OPEN_METEO_API ?? "https://api.open-meteo.com";
 const GITHUB_API = process.env.GITHUB_API ?? "https://api.github.com";
 const GITHUB_PUBLIC_API_TOKEN = process.env.GITHUB_PUBLIC_API_TOKEN ?? "";
+const L402_BACKEND_TOKEN = process.env.L402_BACKEND_TOKEN ?? "";
+const L402_PUBLIC_URL =
+  process.env.L402_PUBLIC_URL ?? "https://l402.chikocorp.com";
+const L402_REPO_SCAN_PRICE_SATS_VALUE = Number(
+  process.env.L402_REPO_SCAN_PRICE_SATS ?? "50",
+);
+const L402_REPO_SCAN_PRICE_SATS =
+  Number.isInteger(L402_REPO_SCAN_PRICE_SATS_VALUE) &&
+  L402_REPO_SCAN_PRICE_SATS_VALUE > 0 &&
+  L402_REPO_SCAN_PRICE_SATS_VALUE <= 100_000
+    ? L402_REPO_SCAN_PRICE_SATS_VALUE
+    : 50;
+const L402_BACKEND_RATE_LIMIT_VALUE = Number(
+  process.env.L402_BACKEND_RATE_LIMIT_PER_MINUTE ?? "30",
+);
+const L402_BACKEND_RATE_LIMIT_PER_MINUTE =
+  Number.isInteger(L402_BACKEND_RATE_LIMIT_VALUE) &&
+  L402_BACKEND_RATE_LIMIT_VALUE > 0 &&
+  L402_BACKEND_RATE_LIMIT_VALUE <= 10_000
+    ? L402_BACKEND_RATE_LIMIT_VALUE
+    : 30;
 const BLOCKSCOUT = process.env.BLOCKSCOUT ?? "https://base.blockscout.com";
 const USDC_CONTRACT =
   process.env.USDC_CONTRACT ?? "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -219,6 +245,10 @@ let resourceServerInitPromise = null;
 const app = express();
 const RUNTIME = serviceRuntime();
 const TELEMETRY = createTelemetry();
+const requireL402Gateway = createL402GatewayGuard(L402_BACKEND_TOKEN);
+const limitL402BackendRequests = createL402BackendRateLimit(
+  L402_BACKEND_RATE_LIMIT_PER_MINUTE,
+);
 app.set("trust proxy", true);
 if (PUBLIC_URL) {
   app.use((req, _res, next) => {
@@ -284,6 +314,7 @@ const serviceInfo = {
       "GET /.well-known/ai.txt",
       "GET /.well-known/x402",
       "GET /.well-known/x402.json",
+      "GET /.well-known/l402.json",
       "GET /favicon.svg",
       "GET /llms.txt",
       "GET /api/800402/preview",
@@ -521,6 +552,38 @@ app.get("/.well-known/agent-card.json", (req, res) => {
 app.get("/.well-known/agent.json", (_req, res) => {
   res.json(buildAgentMetadata(preflightConfig()));
 });
+
+app.get("/.well-known/l402.json", (_req, res) => {
+  res.json(l402Manifest());
+});
+
+app.get(
+  "/api/l402/repo-opportunity-scan",
+  requireL402Gateway,
+  limitL402BackendRequests,
+  async (req, res, next) => {
+    try {
+      res.json(await buildRepoOpportunityScan(req.query, l402ScanOptions()));
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
+app.post(
+  "/api/l402/repo-opportunity-scan",
+  requireL402Gateway,
+  limitL402BackendRequests,
+  async (req, res, next) => {
+    try {
+      res.json(
+        await buildRepoOpportunityScan(bodyToQuery(req.body), l402ScanOptions()),
+      );
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 app.get("/api/800402/preview", (_req, res) => {
   res.json({
@@ -1913,6 +1976,56 @@ function preflightConfig() {
     auditPrice: PREFLIGHT_AUDIT_X402_PRICE,
     remediationPrice: REMEDIATION_X402_PRICE,
   };
+}
+
+function l402ScanOptions() {
+  return {
+    githubApi: GITHUB_API,
+    githubToken: GITHUB_PUBLIC_API_TOKEN,
+  };
+}
+
+function l402Manifest() {
+  const root = l402BaseUrl();
+  const resource = `${root}/api/l402/repo-opportunity-scan`;
+  return {
+    name: "Agent Commerce Desk L402 Repo Opportunity Scan",
+    version: RUNTIME.version,
+    description:
+      "Deterministic GitHub issue, pull-request competition, and execution-risk triage for coding agents.",
+    protocol: "L402",
+    network: "bitcoin-mainnet-lightning",
+    gateway: "Lightning Labs Aperture",
+    resource: {
+      url: resource,
+      methods: ["GET", "POST"],
+      priceSats: L402_REPO_SCAN_PRICE_SATS,
+      challengeIsAuthoritative: true,
+      input: {
+        repo: "owner/repository or https://github.com/owner/repository",
+        limit: "optional integer from 1 to 10",
+      },
+    },
+    clientExample:
+      `lnget --max-cost ${L402_REPO_SCAN_PRICE_SATS} ` +
+      `"${resource}?repo=lightninglabs/aperture&limit=5"`,
+    security: {
+      publicRepositoriesOnly: true,
+      backendRequiresPrivateGatewayCredential: true,
+      backendRateLimitPerMinute: L402_BACKEND_RATE_LIMIT_PER_MINUTE,
+      secretsAccepted: false,
+    },
+  };
+}
+
+function l402BaseUrl() {
+  try {
+    const url = new URL(L402_PUBLIC_URL);
+    if (url.protocol !== "https:") throw new Error("HTTPS required");
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "https://l402.chikocorp.com";
+  }
 }
 
 async function runMcpPreflight(args, req, profile) {

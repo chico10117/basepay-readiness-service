@@ -1,0 +1,35 @@
+# Aperture terminates L402 authentication while Traefik terminates public TLS.
+listenaddr: "0.0.0.0:8081"
+insecure: true
+debuglevel: "info"
+strictverify: true
+dbbackend: "sqlite"
+
+sqlite:
+  dbfile: "/root/.aperture/aperture.db"
+
+authenticator:
+  network: "mainnet"
+  lndhost: "lnd:10009"
+  tlspath: "/etc/l402-aperture/lnd/tls.cert"
+  macdir: "/etc/l402-aperture/lnd/mainnet"
+
+services:
+  - name: "repo-opportunity-scan"
+    hostregexp: '^l402\.chikocorp\.com$'
+    pathregexp: '^(/api/l402/repo-opportunity-scan|/\.well-known/l402\.json|/health)$'
+    address: "host.docker.internal:4021"
+    protocol: http
+    headers:
+      X-L402-Backend-Token: "__L402_BACKEND_TOKEN__"
+    capabilities: "repo-scan:read"
+    price: __L402_PRICE_SATS__
+    timeout: 300
+    authwhitelistpaths:
+      - '^/health$'
+      - '^/\.well-known/l402\.json$'
+    ratelimits:
+      - pathregexp: '^/api/l402/repo-opportunity-scan$'
+        requests: 1
+        per: 10m
+        burst: 1

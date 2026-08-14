@@ -9,7 +9,7 @@
     "worker": "node scripts/run-review-worker.js",
     "reconcile:settlements": "node scripts/reconcile-settlements.js",
     "test:x402-trigger": "node scripts/conditional-x402-payment.js",
-    "check": "for file in public/*.js src/*.js src/mcp/*.js src/preflight/*.js src/review/*.js src/routes/*.js scripts/*.js; do node --check \"$file\"; done",
+    "check": "for file in public/*.js src/*.js src/l402/*.js src/mcp/*.js src/preflight/*.js src/review/*.js src/routes/*.js scripts/*.js; do node --check \"$file\"; done",
     "test": "node --test",
     "validate:bazaar": "node scripts/validate-bazaar.js",
     "verify:discovery": "node scripts/verify-discovery.js",
