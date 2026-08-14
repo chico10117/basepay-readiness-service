@@ -55,7 +55,8 @@ Aperture needs an invoice backend before it can issue a real L402 challenge.
 The selected production path is LND `v0.21.1-beta` with a Neutrino light
 client. The Compose stack publishes Lightning peer traffic on `9735`, but binds
 LND RPC and REST to host loopback only. Aperture reaches gRPC over the private
-`l402_internal` network.
+`l402_internal` network. The configured Neutrino peers were live-tested for the
+`NODE_COMPACT_FILTERS` service bit; recheck them during future LND upgrades.
 
 Install the configuration and a random wallet password without displaying it,
 then start only LND:
