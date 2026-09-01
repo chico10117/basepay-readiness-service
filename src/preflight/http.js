@@ -4,6 +4,7 @@ import {
   errorEnvelope,
   PreflightInputError,
   validatePreflightInput,
+  validatePreflightQuery,
   validateRemediationInput,
 } from "./schemas.js";
 
@@ -24,6 +25,7 @@ export function createPreflightHandlers(options) {
   return {
     validateInspect: validatePreflightBody(common),
     validateAudit: validatePreflightBody(common, { allowEmptyChallengeProbe: true }),
+    validateAuditQuery: validatePreflightQueryParams(common),
     validateRemediation: validateRemediationBody(),
     inspect: async (req, res) => {
       try {
@@ -132,6 +134,19 @@ function validatePreflightBody(options, config = {}) {
     }
     try {
       req.preflightInput = validatePreflightInput(req.body, options);
+      await assertPublicUrl(req.preflightInput.resource_url);
+      return next();
+    } catch (error) {
+      return sendPreflightError(res, req, error);
+    }
+  };
+}
+
+function validatePreflightQueryParams(options) {
+  return async (req, res, next) => {
+    if (req.method === "OPTIONS") return next();
+    try {
+      req.preflightInput = validatePreflightQuery(req.query, options);
       await assertPublicUrl(req.preflightInput.resource_url);
       return next();
     } catch (error) {

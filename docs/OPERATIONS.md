@@ -109,6 +109,23 @@ canonical audit URL is already indexed. A Bazaar catalog entry appears only
 after a successful CDP-facilitated settlement. That production settlement is
 a separate, explicitly authorized manual action.
 
+After deploying the GET compatibility alias, verify a parameterized unpaid
+challenge without signing or paying:
+
+```sh
+PUBLIC_URL=https://x402-wallet-readiness-service.vercel.app \
+AUDIT_TARGET_URL=https://example.com/api/resource \
+node scripts/verify-discovery.js
+```
+
+The verifier checks that the alias is a GET operation, carries Bazaar
+`queryParams`, rejects an unparameterized request before x402, and returns the
+same `$0.05` Base challenge as the canonical POST. The target URL is only
+included in the unpaid query; no target request is made until a buyer presents
+a valid payment. The GET alias caps decoded `resource_url` values at 1,024
+characters and keeps its Bazaar declaration compact to bound the encoded
+`PAYMENT-REQUIRED` response header; OpenAPI remains the full response contract.
+
 ## Prepare MCP Registry Publication
 
 1. Deploy and verify public HTTPS `POST /mcp`.

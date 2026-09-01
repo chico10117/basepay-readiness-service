@@ -21,6 +21,13 @@ settlement, or delivery of a business outcome.
 | `audit_x402_endpoint` | `POST /api/x402/preflight/audit` | x402, `$0.05` default | Deep-check schemas, discovery, CORS, redirects, cache, and policy. |
 | `order_x402_remediation` | `POST /api/x402/preflight/remediation` | x402, configurable | Escalate a blocked or risky audit into a durable remediation intake. |
 
+For HTTP clients that cannot submit a JSON body during discovery, the paid audit
+also has a compatibility alias at `GET /api/x402/preflight/audit`. It requires
+`resource_url` in the query string and accepts optional `method=GET|HEAD`,
+`expected_network`, and `max_price_usd` parameters. The alias uses the same
+price, x402 payment, and audit report as the canonical POST, but is not a
+fourth capability and never audits a POST target.
+
 Canonical remediation requires a healthy `ORDER_DATABASE_URL`. If durable
 storage is unavailable, HTTP and MCP calls fail with
 `REMEDIATION_UNAVAILABLE` before a payment challenge is served.
@@ -111,6 +118,14 @@ An entirely empty unauthenticated `POST` to the paid audit also returns its
 `402` challenge for method probes. A request that includes a payment attempt
 still requires the complete input before payment processing.
 
+The compatibility GET alias requires its target before payment and returns
+`400` without a challenge when `resource_url` is missing or query parameters
+are unknown, repeated, empty, non-scalar, unsafe, or invalid:
+
+```sh
+curl -i 'http://localhost:4021/api/x402/preflight/audit?resource_url=https%3A%2F%2Fexample.com%2Fapi%2Fresource&method=GET&expected_network=eip155%3A8453&max_price_usd=1'
+```
+
 The runtime `402` response is authoritative for amount, network, asset,
 `payTo`, and Bazaar extensions. The static contract is available at
 `/openapi.json`. Errors use one strict envelope with a machine code,
@@ -160,7 +175,11 @@ POST /mcp  (initialize, tools/list, tools/call)
 
 The x402 resource server registers the Bazaar extension and publishes strict
 HTTP and MCP declarations for audit and remediation, including schemas and
-examples.
+examples. The POST audit declaration uses a JSON body; the compatibility GET
+declaration publishes compact Bazaar `queryParams` and summary-output contracts
+so the payment challenge remains safely below common header limits. OpenAPI
+documents the alias's full response schema, which is identical to the canonical
+audit.
 
 Use CDP Facilitator in production:
 

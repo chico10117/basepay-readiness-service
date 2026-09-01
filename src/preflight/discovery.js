@@ -1,6 +1,8 @@
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import {
   errorEnvelopeSchema,
+  PREFLIGHT_DECISIONS,
+  PREFLIGHT_QUERY_RESOURCE_URL_MAX_LENGTH,
   preflightInputSchema,
   preflightReportSchema,
   remediationInputSchema,
@@ -151,7 +153,7 @@ export function buildPublicManifest(config) {
       agent: `${config.baseUrl}/.well-known/agent.json`,
     },
     capabilities: canonicalCapabilities(config),
-    labs: legacyCapabilities(config.baseUrl),
+    labs: [...legacyCapabilities(config.baseUrl), auditQueryCompatibility(config)],
   };
 }
 
@@ -175,7 +177,7 @@ export function buildAgentMetadata(config) {
       acceptsSecrets: false,
       privateTargetsAllowed: false,
     },
-    labs: legacyCapabilities(config.baseUrl),
+    labs: [...legacyCapabilities(config.baseUrl), auditQueryCompatibility(config)],
   };
 }
 
@@ -226,7 +228,7 @@ export function buildX402Manifest(config) {
         accepts: [paymentRequirement(config, config.remediationPrice)],
       },
     ],
-    labs: legacyCapabilities(config.baseUrl),
+    labs: [...legacyCapabilities(config.baseUrl), auditQueryCompatibility(config)],
   };
 }
 
@@ -257,6 +259,18 @@ export function buildOpenApiDocument(config) {
         }),
       },
       "/api/x402/preflight/audit": {
+        get: operation({
+          operationId: "audit_x402_endpoint_query",
+          summary: "Run a deep paid x402 endpoint audit over query parameters",
+          description:
+            "Compatibility GET alias for audit_x402_endpoint. Supply a public HTTPS resource_url and optional policy limits in the query string; only GET and HEAD targets are accepted.",
+          parameters: preflightQueryParameters(config),
+          responseSchema: "PreflightReport",
+          paid: true,
+          payment: paymentInfo(config, config.auditPrice),
+          compatibility: true,
+          primaryCapability: "audit_x402_endpoint",
+        }),
         post: operation({
           operationId: "audit_x402_endpoint",
           summary: "Run a deep paid x402 endpoint audit",
@@ -290,7 +304,7 @@ export function buildOpenApiDocument(config) {
       },
     },
     "x-mcp-endpoint": `${config.baseUrl}/mcp`,
-    "x-labs": legacyCapabilities(config.baseUrl),
+    "x-labs": [...legacyCapabilities(config.baseUrl), auditQueryCompatibility(config)],
   };
 }
 
@@ -306,6 +320,12 @@ Call this service before paying an unfamiliar x402 endpoint. It never signs a pa
 1. inspect_x402_endpoint — POST ${config.baseUrl}/api/preflight/inspect — free
 2. audit_x402_endpoint — POST ${config.baseUrl}/api/x402/preflight/audit — x402 ${config.auditPrice}
 3. order_x402_remediation — POST ${config.baseUrl}/api/x402/preflight/remediation — x402 ${config.remediationPrice}
+
+Compatibility alias (same audit, price, and report; not a fourth capability):
+
+GET ${auditQueryExampleUrl(config)}
+
+The GET alias requires resource_url in the query string and accepts optional method (GET or HEAD only), expected_network, and max_price_usd parameters. It rejects duplicate, unknown, empty, unsafe, or non-scalar query parameters before serving an x402 challenge.
 
 Input example:
 
@@ -336,6 +356,7 @@ MCP: ${config.baseUrl}/mcp
 x402: ${config.baseUrl}/.well-known/x402.json
 
 Primary tools: inspect_x402_endpoint, audit_x402_endpoint, order_x402_remediation.
+HTTP audit compatibility alias: GET ${auditQueryExampleUrl(config)}
 Never provide private keys, payment signatures, authorization headers, cookies, or access tokens as tool input.
 `;
 }
@@ -350,6 +371,19 @@ export function auditHttpDiscoveryExtension(config) {
       type: "json",
       schema: schemaBody(preflightReportSchema),
       example: preflightReportExample(config),
+    },
+  });
+}
+
+export function auditQueryHttpDiscoveryExtension(config) {
+  return declareDiscoveryExtension({
+    method: "GET",
+    input: preflightInputExample(config),
+    inputSchema: schemaBody(preflightQueryInputSchema()),
+    output: {
+      type: "json",
+      schema: compactPreflightReportSchema(),
+      example: compactPreflightReportExample(config),
     },
   });
 }
@@ -486,6 +520,42 @@ export function preflightReportExample(config) {
   };
 }
 
+function compactPreflightReportSchema() {
+  return {
+    type: "object",
+    required: ["profile", "decision", "score", "requestId", "resource", "payment", "issues"],
+    properties: {
+      profile: { type: "string", enum: ["audit"] },
+      decision: { type: "string", enum: PREFLIGHT_DECISIONS },
+      score: { type: "integer", minimum: 0, maximum: 100 },
+      requestId: { type: "string" },
+      resource: { type: "object" },
+      payment: { type: "object" },
+      issues: { type: "array" },
+    },
+  };
+}
+
+function compactPreflightReportExample(config) {
+  return {
+    profile: "audit",
+    decision: "ALLOW",
+    score: 100,
+    requestId: "req_example1234",
+    resource: {
+      url: "https://example.com/api/resource",
+      method: "GET",
+      statusCode: 402,
+    },
+    payment: {
+      detected: true,
+      network: config.network,
+      priceUsd: 0.05,
+    },
+    issues: [],
+  };
+}
+
 function canonicalCapabilities(config) {
   return [
     {
@@ -521,6 +591,37 @@ function canonicalCapabilities(config) {
   ];
 }
 
+function auditQueryCompatibility(config) {
+  return {
+    category: "preflight",
+    endpoint: auditQueryExampleUrl(config),
+    method: "GET",
+    status: "compatibility",
+    description:
+      "GET compatibility alias for audit_x402_endpoint; requires a public HTTPS resource_url query parameter and only audits GET or HEAD targets.",
+  };
+}
+
+function preflightQueryInputSchema() {
+  const schema = structuredClone(preflightInputSchema);
+  schema.properties.resource_url.maxLength = PREFLIGHT_QUERY_RESOURCE_URL_MAX_LENGTH;
+  schema.properties.method = {
+    ...schema.properties.method,
+    enum: ["GET", "HEAD"],
+    default: "GET",
+  };
+  return schema;
+}
+
+function auditQueryExampleUrl(config) {
+  const url = new URL(`${config.baseUrl}/api/x402/preflight/audit`);
+  url.searchParams.set("resource_url", "https://example.com/api/resource");
+  url.searchParams.set("method", "GET");
+  url.searchParams.set("expected_network", config.network);
+  url.searchParams.set("max_price_usd", "1");
+  return url.toString();
+}
+
 function legacyCapabilities(baseUrl) {
   return [
     { category: "wallet", endpoint: `${baseUrl}/api/preview`, status: "labs" },
@@ -543,23 +644,36 @@ function operation({
   summary,
   description,
   requestSchema,
+  parameters,
   responseSchema,
   paid,
   payment,
+  compatibility = false,
+  primaryCapability,
 }) {
   return {
     tags: ["preflight"],
     operationId,
     summary,
     description,
-    requestBody: {
-      required: true,
-      content: {
-        "application/json": {
-          schema: { $ref: `#/components/schemas/${requestSchema}` },
-        },
-      },
-    },
+    ...(parameters
+      ? { parameters }
+      : {
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: `#/components/schemas/${requestSchema}` },
+              },
+            },
+          },
+        }),
+    ...(compatibility
+      ? {
+          "x-compatibility": true,
+          "x-primary-capability": primaryCapability,
+        }
+      : {}),
     ...(paid ? { "x-payment-info": payment } : {}),
     responses: {
       200: {
@@ -586,6 +700,49 @@ function operation({
       502: errorResponse("The target or facilitator was unavailable."),
       504: errorResponse("The target timed out."),
     },
+  };
+}
+
+function preflightQueryParameters(config) {
+  return [
+    queryParameter(
+      "resource_url",
+      preflightInputSchema.properties.resource_url,
+      true,
+      "Public HTTPS x402 resource to inspect without payment credentials.",
+    ),
+    queryParameter(
+      "method",
+      {
+        ...preflightInputSchema.properties.method,
+        enum: ["GET", "HEAD"],
+        default: "GET",
+      },
+      false,
+      "Target request method. The GET alias accepts GET or HEAD only.",
+    ),
+    queryParameter(
+      "expected_network",
+      { ...preflightInputSchema.properties.expected_network, default: config.network },
+      false,
+      "Expected CAIP-2 payment network; defaults to the service network.",
+    ),
+    queryParameter(
+      "max_price_usd",
+      preflightInputSchema.properties.max_price_usd,
+      false,
+      "Maximum acceptable target price in USD.",
+    ),
+  ];
+}
+
+function queryParameter(name, schema, required, description) {
+  return {
+    name,
+    in: "query",
+    required,
+    description,
+    schema: withoutId(schema),
   };
 }
 

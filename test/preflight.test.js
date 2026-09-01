@@ -4,6 +4,7 @@ import test from "node:test";
 import { validateDiscoveryExtension } from "@x402/extensions/bazaar";
 import {
   auditHttpDiscoveryExtension,
+  auditQueryHttpDiscoveryExtension,
   auditMcpDiscoveryExtension,
   buildA2ANotImplemented,
   buildAgentMetadata,
@@ -13,6 +14,7 @@ import {
 import { parseX402Challenge } from "../src/preflight/challenge.js";
 import { inspectX402Endpoint } from "../src/preflight/inspector.js";
 import {
+  validatePreflightQuery,
   validatePreflightInput,
   validateRemediationInput,
 } from "../src/preflight/schemas.js";
@@ -93,6 +95,60 @@ test("strictly validates preflight and remediation inputs", () => {
       language: "x",
     }),
     /at least 2 characters/i,
+  );
+});
+
+test("strictly validates the paid audit query alias and blocks POST targets", () => {
+  assert.deepEqual(
+    validatePreflightQuery(
+      {
+        resource_url: "https://merchant.example/paid#fragment",
+        method: "head",
+        expected_network: CONFIG.network,
+        max_price_usd: "1",
+      },
+      { defaultNetwork: CONFIG.network },
+    ),
+    {
+      resource_url: "https://merchant.example/paid",
+      method: "HEAD",
+      expected_network: CONFIG.network,
+      max_price_usd: 1,
+    },
+  );
+  assert.throws(
+    () => validatePreflightQuery({ resource_url: "https://merchant.example", extra: "x" }),
+    /unsupported query parameter/i,
+  );
+  assert.throws(
+    () => validatePreflightQuery({
+      resource_url: ["https://merchant.example/one", "https://merchant.example/two"],
+    }),
+    /only once/i,
+  );
+  assert.throws(
+    () => validatePreflightQuery({
+      resource_url: "https://merchant.example",
+      method: "POST",
+    }),
+    /GET or HEAD/i,
+  );
+  assert.throws(
+    () => validatePreflightQuery({
+      resource_url: "https://merchant.example",
+      max_price_usd: "not-a-number",
+    }),
+    /finite number/i,
+  );
+  assert.throws(
+    () => validatePreflightQuery({ resource_url: "" }),
+    /must not be empty|is required/i,
+  );
+  assert.throws(
+    () => validatePreflightQuery({
+      resource_url: `https://example.com/${"a".repeat(1025)}`,
+    }),
+    error => error.code === "QUERY_RESOURCE_URL_TOO_LONG",
   );
 });
 
@@ -347,11 +403,47 @@ test("primary discovery surfaces expose exactly three canonical capabilities", (
   assert.equal(buildA2ANotImplemented(CONFIG, "req_test").error.code, "A2A_NOT_IMPLEMENTED");
 });
 
-test("official Bazaar validator accepts HTTP and MCP audit declarations", () => {
+test("GET audit discovery is a compatibility query operation", () => {
+  const openapi = buildOpenApiDocument(CONFIG);
+  const auditGet = openapi.paths["/api/x402/preflight/audit"].get;
+  assert.equal(auditGet.operationId, "audit_x402_endpoint_query");
+  assert.equal(auditGet["x-compatibility"], true);
+  assert.equal(auditGet["x-primary-capability"], "audit_x402_endpoint");
+  assert.deepEqual(
+    auditGet.parameters.map(parameter => parameter.name),
+    ["resource_url", "method", "expected_network", "max_price_usd"],
+  );
+  assert.equal(auditGet.parameters[0].required, true);
+  assert.equal(auditGet.parameters[0].in, "query");
+  assert.equal(auditGet.parameters[1].schema.default, "GET");
+  assert.deepEqual(auditGet.parameters[1].schema.enum, ["GET", "HEAD"]);
+  assert.equal(auditGet["x-payment-info"].priceUsd, 0.05);
+  const manifest = buildPublicManifest(CONFIG);
+  assert.equal(
+    manifest.labs.some(item => item.endpoint.includes("/api/x402/preflight/audit?")),
+    true,
+  );
+});
+
+test("official Bazaar validator accepts HTTP, query HTTP, and MCP audit declarations", () => {
   assert.equal(
     validateDiscoveryExtension(auditHttpDiscoveryExtension(CONFIG).bazaar).valid,
     true,
   );
+  const queryDeclaration = auditQueryHttpDiscoveryExtension(CONFIG).bazaar;
+  assert.equal(validateDiscoveryExtension(queryDeclaration).valid, true);
+  assert.equal(queryDeclaration.info.input.method, "GET");
+  assert.deepEqual(queryDeclaration.info.input.queryParams, {
+    resource_url: "https://example.com/api/resource",
+    method: "GET",
+    expected_network: CONFIG.network,
+    max_price_usd: 1,
+  });
+  assert.deepEqual(
+    queryDeclaration.schema.properties.input.properties.queryParams.properties.method.enum,
+    ["GET", "HEAD"],
+  );
+  assert.equal("bodyType" in queryDeclaration.info.input, false);
   assert.equal(
     validateDiscoveryExtension(auditMcpDiscoveryExtension(CONFIG).bazaar).valid,
     true,
@@ -439,6 +531,39 @@ test("canonical remediation fails before payment when durable storage is unavail
   assert.equal(response.headers.has("payment-required"), false);
 });
 
+test("GET audit validates required, unique, and safe query parameters before x402", async t => {
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const root = `http://127.0.0.1:${server.address().port}`;
+  const target = encodeURIComponent("https://93.184.216.34/resource");
+  const requests = [
+    {
+      url: `${root}/api/x402/preflight/audit`,
+      code: "MISSING_REQUIRED_FIELD",
+    },
+    {
+      url: `${root}/api/x402/preflight/audit?resource_url=${target}&resource_url=${target}`,
+      code: "DUPLICATE_QUERY_PARAMETER",
+    },
+    {
+      url: `${root}/api/x402/preflight/audit?resource_url=${target}&unexpected=value`,
+      code: "UNKNOWN_QUERY_PARAMETER",
+    },
+    {
+      url: `${root}/api/x402/preflight/audit?resource_url=${target}&method=POST`,
+      code: "UNSAFE_QUERY_METHOD",
+      headers: { "payment-signature": "not-a-payment" },
+    },
+  ];
+  for (const request of requests) {
+    const response = await fetch(request.url, { method: "GET", headers: request.headers });
+    assert.equal(response.status, 400, request.url);
+    assert.equal((await response.json()).error.code, request.code, request.url);
+    assert.equal(response.headers.has("payment-required"), false, request.url);
+  }
+});
+
 test("unpaid canonical audit returns a valid 0.05 USD Bazaar challenge", async t => {
   const nativeFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
@@ -482,6 +607,114 @@ test("unpaid canonical audit returns a valid 0.05 USD Bazaar challenge", async t
   assert.equal(challenge.payment.payTo.toLowerCase(), CONFIG.payTo.toLowerCase());
   assert.equal(challenge.payment.bazaar.found, true);
   assert.equal(challenge.payment.bazaar.valid, true);
+});
+
+test("unpaid GET audit returns a valid query Bazaar challenge", async t => {
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/supported")) {
+      return jsonResponse({
+        kinds: [{ x402Version: 2, scheme: "exact", network: CONFIG.network }],
+        extensions: ["bazaar"],
+        signers: {},
+      });
+    }
+    return nativeFetch(url, init);
+  };
+  t.after(() => {
+    globalThis.fetch = nativeFetch;
+  });
+
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = new URL(
+    `/api/x402/preflight/audit`,
+    `http://127.0.0.1:${server.address().port}`,
+  );
+  url.searchParams.set("resource_url", "https://93.184.216.34/resource");
+  url.searchParams.set("method", "GET");
+  url.searchParams.set("expected_network", CONFIG.network);
+  url.searchParams.set("max_price_usd", "1");
+  const response = await nativeFetch(url, {
+    method: "GET",
+    redirect: "manual",
+  });
+  assert.equal(response.status, 402);
+  assert.match(response.headers.get("cache-control"), /no-store|private/i);
+  const encoded = response.headers.get("payment-required");
+  const rawChallenge = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  assert.deepEqual(rawChallenge.extensions.bazaar.info.input, {
+    type: "http",
+    method: "GET",
+    queryParams: {
+      resource_url: "https://example.com/api/resource",
+      method: "GET",
+      expected_network: CONFIG.network,
+      max_price_usd: 1,
+    },
+  });
+  assert.equal(
+    rawChallenge.extensions.bazaar.schema.properties.input.properties.queryParams.required.includes(
+      "resource_url",
+    ),
+    true,
+  );
+  assert.equal("bodyType" in rawChallenge.extensions.bazaar.info.input, false);
+  const challenge = parseX402Challenge(response.headers, await response.text(), {
+    usdcContract: CONFIG.asset,
+  });
+  assert.equal(challenge.payment.network, CONFIG.network);
+  assert.equal(challenge.payment.amountAtomic, "50000");
+  assert.equal(challenge.payment.payTo.toLowerCase(), CONFIG.payTo.toLowerCase());
+  assert.equal(challenge.payment.bazaar.method, "GET");
+  assert.equal(challenge.payment.bazaar.valid, true);
+});
+
+test("GET audit challenge remains header-safe at the query URL limit", async t => {
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/supported")) {
+      return jsonResponse({
+        kinds: [{ x402Version: 2, scheme: "exact", network: CONFIG.network }],
+        extensions: ["bazaar"],
+        signers: {},
+      });
+    }
+    return nativeFetch(url, init);
+  };
+  t.after(() => {
+    globalThis.fetch = nativeFetch;
+  });
+
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = new URL(
+    "/api/x402/preflight/audit",
+    `http://127.0.0.1:${server.address().port}`,
+  );
+  const prefix = "https://example.com/";
+  url.searchParams.set("resource_url", `${prefix}${"a".repeat(1024 - prefix.length)}`);
+  url.searchParams.set("method", "GET");
+  const response = await nativeFetch(url, { method: "GET", redirect: "manual" });
+  assert.equal(response.status, 402);
+  const encoded = response.headers.get("payment-required");
+  assert.ok(encoded);
+  assert.ok(
+    Buffer.byteLength(encoded, "utf8") < 8_000,
+    `PAYMENT-REQUIRED header is ${Buffer.byteLength(encoded, "utf8")} bytes`,
+  );
+  const rawChallenge = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  assert.deepEqual(
+    Object.keys(rawChallenge.extensions.bazaar.info.output.example).sort(),
+    ["decision", "issues", "payment", "profile", "requestId", "resource", "score"],
+  );
+  assert.equal(
+    rawChallenge.extensions.bazaar.schema.properties.input.properties.queryParams.properties
+      .resource_url.maxLength,
+    1024,
+  );
 });
 
 test("empty unauthenticated audit POST returns a challenge for method probes", async t => {

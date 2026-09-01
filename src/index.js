@@ -44,6 +44,7 @@ import {
 } from "./mcp/server.js";
 import {
   auditHttpDiscoveryExtension,
+  auditQueryHttpDiscoveryExtension,
   auditMcpDiscoveryExtension,
   buildA2ANotImplemented,
   buildAgentMetadata,
@@ -1361,7 +1362,12 @@ app.use((req, res, next) => {
 
 app.use("/api/x402/services/integration-triage", validatePaidServiceIntake);
 app.use("/api/x402/services/quick-review", validatePaidServiceIntake);
-app.use("/api/x402/preflight/audit", preflightHandlers.validateAudit);
+app.use("/api/x402/preflight/audit", (req, res, next) => {
+  if (req.method === "GET" || req.method === "HEAD") {
+    return preflightHandlers.validateAuditQuery(req, res, next);
+  }
+  return preflightHandlers.validateAudit(req, res, next);
+});
 app.use("/api/x402/preflight/remediation", preflightHandlers.validateRemediation);
 app.use(
   "/api/x402/preflight/remediation",
@@ -1415,6 +1421,20 @@ app.use(async (req, res, next) => {
 });
 
 const paidRouteConfigs = withHeadPaymentRoutes({
+      "GET /api/x402/preflight/audit": {
+        accepts: [
+          {
+            scheme: "exact",
+            price: PREFLIGHT_AUDIT_X402_PRICE,
+            network: NETWORK,
+            payTo: PAY_TO,
+          },
+        ],
+        description:
+          "Compatibility GET alias for a deep x402 endpoint audit. Requires resource_url in the query string and only audits GET or HEAD targets.",
+        mimeType: "application/json",
+        extensions: auditQueryHttpDiscoveryExtension(preflightConfig()),
+      },
       "POST /api/x402/preflight/audit": {
         accepts: [
           {
@@ -1732,6 +1752,7 @@ app.use(
 );
 
 app.post("/api/x402/preflight/audit", preflightHandlers.audit);
+app.get("/api/x402/preflight/audit", preflightHandlers.audit);
 
 app.post("/api/x402/preflight/remediation", async (req, res, next) => {
   try {
