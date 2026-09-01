@@ -1,0 +1,60 @@
+name: Publish MCP Registry metadata
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Validate and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install verified MCP publisher
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.1
+          MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+        run: |
+          curl -fsSL \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            -o mcp-publisher.tar.gz
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum --check --strict
+          tar -xzf mcp-publisher.tar.gz mcp-publisher
+          chmod +x mcp-publisher
+
+      - name: Validate descriptor
+        run: ./mcp-publisher validate server.json
+
+      - name: Authenticate with GitHub OIDC
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish descriptor
+        run: ./mcp-publisher publish server.json
+
+      - name: Verify published version
+        env:
+          REGISTRY_URL: https://registry.modelcontextprotocol.io/v0.1/servers
+        run: |
+          server_name="$(jq -r '.name' server.json)"
+          server_version="$(jq -r '.version' server.json)"
+
+          for attempt in 1 2 3 4 5; do
+            response="$(curl -fsS --get --data-urlencode "search=${server_name}" "${REGISTRY_URL}")"
+            if jq -e \
+              --arg name "${server_name}" \
+              --arg version "${server_version}" \
+              'any(.servers[]?; .server.name == $name and .server.version == $version)' \
+              <<<"${response}" >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Published server version did not appear in the registry lookup." >&2
+          exit 1
