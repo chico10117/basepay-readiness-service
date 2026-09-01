@@ -7,6 +7,14 @@ import {
   validateRemediationInput,
 } from "./schemas.js";
 
+const PAYMENT_ATTEMPT_HEADERS = [
+  "payment-signature",
+  "x-payment",
+  "payment",
+  "x-402-payment",
+  "x402-payment",
+];
+
 export function createPreflightHandlers(options) {
   const common = {
     defaultNetwork: options.network,
@@ -15,7 +23,7 @@ export function createPreflightHandlers(options) {
 
   return {
     validateInspect: validatePreflightBody(common),
-    validateAudit: validatePreflightBody(common),
+    validateAudit: validatePreflightBody(common, { allowEmptyChallengeProbe: true }),
     validateRemediation: validateRemediationBody(),
     inspect: async (req, res) => {
       try {
@@ -116,9 +124,12 @@ export function sendPreflightError(res, req, error) {
     .json(errorEnvelope(normalized, req.requestId ?? "req_unknown"));
 }
 
-function validatePreflightBody(options) {
+function validatePreflightBody(options, config = {}) {
   return async (req, res, next) => {
     if (req.method === "OPTIONS") return next();
+    if (config.allowEmptyChallengeProbe && isEmptyUnauthenticatedProbe(req)) {
+      return next();
+    }
     try {
       req.preflightInput = validatePreflightInput(req.body, options);
       await assertPublicUrl(req.preflightInput.resource_url);
@@ -127,6 +138,27 @@ function validatePreflightBody(options) {
       return sendPreflightError(res, req, error);
     }
   };
+}
+
+function isEmptyUnauthenticatedProbe(req) {
+  if (req.method !== "POST" || req.path !== "/" || hasPaymentAttempt(req)) return false;
+  if (req.body === undefined) return hasNoEncodedBody(req);
+  return Boolean(
+    req.body &&
+    typeof req.body === "object" &&
+    !Array.isArray(req.body) &&
+    Object.keys(req.body).length === 0,
+  );
+}
+
+function hasNoEncodedBody(req) {
+  if (req.get("transfer-encoding")) return false;
+  const contentLength = req.get("content-length");
+  return contentLength === undefined || contentLength === "0";
+}
+
+function hasPaymentAttempt(req) {
+  return PAYMENT_ATTEMPT_HEADERS.some(header => Boolean(req.get(header)));
 }
 
 function validateRemediationBody() {

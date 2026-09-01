@@ -76,6 +76,7 @@ Existing wallet, market, weather, repository, marketplace, signing-helper, and w
 - A preflight report proves only what was observed over HTTPS at a point in time; it cannot prove future availability, seller intent, contract safety, or that a later payment will settle.
 - DNS validation reduces SSRF risk but cannot eliminate every DNS rebinding race in Node's default fetch implementation. Redirects are revalidated and private/link-local/metadata destinations are blocked.
 - A configured `POST` inspection sends an empty JSON object to observe the method-specific challenge. The service sends no buyer credential, but cannot guarantee that a third-party target treats an unauthenticated POST as side-effect free.
+- An entirely empty unauthenticated POST to the canonical paid audit is allowed through to the x402 middleware for challenge discovery; requests with a payment attempt still require a complete preflight input before payment processing.
 - Canonical remediation intentionally returns `REMEDIATION_UNAVAILABLE` before payment when its PostgreSQL order store is not healthy.
 - Bazaar catalog presence requires a real successful settlement through CDP and remains a post-deployment manual verification.
 - No A2A server, wallet signing, automatic spending, deployment, process restart, or registry publication is included.
