@@ -40,6 +40,21 @@ function verifyLocalContracts(config) {
     "OpenAPI",
     Object.values(openapi.paths).map(path => path.post.operationId),
   );
+  const auditQuery = openapi.paths["/api/x402/preflight/audit"]?.get;
+  if (auditQuery?.operationId !== "audit_x402_endpoint_query") {
+    throw new Error("OpenAPI is missing the GET audit compatibility alias");
+  }
+  const queryParameterNames = auditQuery.parameters
+    .filter(parameter => parameter.in === "query")
+    .map(parameter => parameter.name);
+  if (JSON.stringify(queryParameterNames) !== JSON.stringify([
+    "resource_url",
+    "method",
+    "expected_network",
+    "max_price_usd",
+  ])) {
+    throw new Error("OpenAPI GET audit query parameters are inconsistent");
+  }
   for (const name of expectedTools) {
     if (!llms.includes(name)) throw new Error(`llms.txt is missing ${name}`);
   }
@@ -131,6 +146,57 @@ async function verifyPublicContracts(config) {
   if (!challenge.payment.bazaar.found || challenge.payment.bazaar.valid !== true) {
     throw new Error("public audit challenge has invalid Bazaar metadata");
   }
+
+  const auditQueryUrl = new URL("/api/x402/preflight/audit", config.baseUrl);
+  const missingQueryResponse = await fetchWithTimeout(auditQueryUrl, {
+    method: "GET",
+    redirect: "manual",
+    headers: { accept: "application/json" },
+  });
+  if (missingQueryResponse.status !== 400) {
+    throw new Error(`public unparameterized GET audit returned HTTP ${missingQueryResponse.status}`);
+  }
+  if (missingQueryResponse.headers.has("payment-required")) {
+    throw new Error("public unparameterized GET audit served a payment challenge");
+  }
+  await missingQueryResponse.text();
+  auditQueryUrl.searchParams.set(
+    "resource_url",
+    process.env.AUDIT_TARGET_URL ?? "https://example.com/api/resource",
+  );
+  auditQueryUrl.searchParams.set("method", "GET");
+  auditQueryUrl.searchParams.set("expected_network", config.network);
+  auditQueryUrl.searchParams.set("max_price_usd", "1");
+  const auditQueryResponse = await fetchWithTimeout(auditQueryUrl, {
+    method: "GET",
+    redirect: "manual",
+    headers: { accept: "application/json" },
+  });
+  if (auditQueryResponse.status !== 402) {
+    throw new Error(`public GET audit returned HTTP ${auditQueryResponse.status}`);
+  }
+  const auditQueryChallenge = parseX402Challenge(
+    auditQueryResponse.headers,
+    await auditQueryResponse.text(),
+    { usdcContract: config.asset },
+  );
+  if (auditQueryChallenge.payment.bazaar.method !== "GET") {
+    throw new Error("public GET audit challenge does not declare method GET");
+  }
+  const queryComparisons = {
+    network: [auditQueryChallenge.payment.network, config.network],
+    asset: [auditQueryChallenge.payment.asset?.toLowerCase(), config.asset.toLowerCase()],
+    amount: [auditQueryChallenge.payment.amountAtomic, expectedAmount],
+    payTo: [auditQueryChallenge.payment.payTo?.toLowerCase(), config.payTo.toLowerCase()],
+  };
+  for (const [field, [actual, expected]] of Object.entries(queryComparisons)) {
+    if (actual !== expected) {
+      throw new Error(`public GET audit ${field} mismatch: ${actual} != ${expected}`);
+    }
+  }
+  if (!auditQueryChallenge.payment.bazaar.found || auditQueryChallenge.payment.bazaar.valid !== true) {
+    throw new Error("public GET audit challenge has invalid Bazaar metadata");
+  }
   return {
     manifest: true,
     openapi: true,
@@ -139,6 +205,7 @@ async function verifyPublicContracts(config) {
     x402Metadata: true,
     challenge402: true,
     bazaar: true,
+    queryAuditChallenge402: true,
   };
 
   function get(path) {

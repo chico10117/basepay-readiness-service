@@ -402,6 +402,61 @@ export function validatePreflightInput(value, options = {}) {
   };
 }
 
+export function validatePreflightQuery(value, options = {}) {
+  const query = requirePlainObject(value, "query parameters");
+  const input = {};
+  const allowedKeys = Object.keys(preflightInputSchema.properties);
+
+  for (const key of Object.keys(query)) {
+    if (!allowedKeys.includes(key)) {
+      throw new PreflightInputError(
+        "UNKNOWN_QUERY_PARAMETER",
+        `unsupported query parameter: ${key}`,
+      );
+    }
+    const rawValue = query[key];
+    if (Array.isArray(rawValue)) {
+      throw new PreflightInputError(
+        "DUPLICATE_QUERY_PARAMETER",
+        `${key} must appear only once`,
+      );
+    }
+    if (typeof rawValue !== "string") {
+      throw new PreflightInputError(
+        "INVALID_QUERY_PARAMETER",
+        `${key} must be a scalar string`,
+      );
+    }
+    if (!rawValue.trim()) {
+      throw new PreflightInputError(
+        "INVALID_QUERY_PARAMETER",
+        `${key} must not be empty`,
+      );
+    }
+    input[key] = rawValue.trim();
+  }
+
+  if (Object.hasOwn(input, "max_price_usd")) {
+    const maxPriceUsd = Number(input.max_price_usd);
+    if (!Number.isFinite(maxPriceUsd)) {
+      throw new PreflightInputError(
+        "INVALID_MAX_PRICE",
+        "max_price_usd must be a finite number",
+      );
+    }
+    input.max_price_usd = maxPriceUsd;
+  }
+
+  const normalized = validatePreflightInput(input, options);
+  if (!["GET", "HEAD"].includes(normalized.method)) {
+    throw new PreflightInputError(
+      "UNSAFE_QUERY_METHOD",
+      "method must be GET or HEAD for the GET audit alias",
+    );
+  }
+  return normalized;
+}
+
 export function validateRemediationInput(value) {
   const input = requirePlainObject(value, "request body");
   rejectUnknownKeys(input, Object.keys(remediationInputSchema.properties));

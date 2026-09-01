@@ -2,6 +2,7 @@ import { facilitator as coinbaseFacilitator } from "@coinbase/x402";
 import { validateDiscoveryExtension } from "@x402/extensions/bazaar";
 import {
   auditHttpDiscoveryExtension,
+  auditQueryHttpDiscoveryExtension,
   auditMcpDiscoveryExtension,
   remediationHttpDiscoveryExtension,
   remediationMcpDiscoveryExtension,
@@ -11,6 +12,7 @@ import { parseX402Challenge } from "../src/preflight/challenge.js";
 const config = discoveryConfig();
 const declarations = {
   audit_http: auditHttpDiscoveryExtension(config),
+  audit_http_query: auditQueryHttpDiscoveryExtension(config),
   audit_mcp: auditMcpDiscoveryExtension(config),
   remediation_http: remediationHttpDiscoveryExtension(config),
   remediation_mcp: remediationMcpDiscoveryExtension(config),
@@ -67,6 +69,42 @@ if (process.env.PUBLIC_URL) {
     network: challenge.payment.network,
     amountAtomic: challenge.payment.amountAtomic,
     bazaarValid: challenge.payment.bazaar.valid,
+  };
+  const queryUrl = new URL("/api/x402/preflight/audit", config.baseUrl);
+  queryUrl.searchParams.set(
+    "resource_url",
+    process.env.AUDIT_TARGET_URL ?? "https://example.com/api/resource",
+  );
+  queryUrl.searchParams.set("method", "GET");
+  queryUrl.searchParams.set("expected_network", config.network);
+  queryUrl.searchParams.set("max_price_usd", "1");
+  const queryResponse = await fetchWithTimeout(queryUrl, {
+    method: "GET",
+    redirect: "manual",
+    headers: { accept: "application/json" },
+  });
+  if (queryResponse.status !== 402) {
+    throw new Error(`public GET audit route returned HTTP ${queryResponse.status}, expected 402`);
+  }
+  const queryChallenge = parseX402Challenge(
+    queryResponse.headers,
+    await queryResponse.text(),
+    { usdcContract: config.asset },
+  );
+  if (
+    !queryChallenge.payment.detected ||
+    queryChallenge.payment.bazaar.valid !== true ||
+    queryChallenge.payment.bazaar.method !== "GET"
+  ) {
+    throw new Error("public GET audit challenge does not contain valid GET Bazaar metadata");
+  }
+  output.publicQueryChallenge = {
+    statusCode: queryResponse.status,
+    version: queryChallenge.payment.x402Version,
+    network: queryChallenge.payment.network,
+    amountAtomic: queryChallenge.payment.amountAtomic,
+    bazaarMethod: queryChallenge.payment.bazaar.method,
+    bazaarValid: queryChallenge.payment.bazaar.valid,
   };
   output.cdpCatalog = await inspectCdpCatalog(config);
 }
