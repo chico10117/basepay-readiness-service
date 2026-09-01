@@ -107,6 +107,10 @@ curl -i http://localhost:4021/api/x402/preflight/audit \
   }'
 ```
 
+An entirely empty unauthenticated `POST` to the paid audit also returns its
+`402` challenge for method probes. A request that includes a payment attempt
+still requires the complete input before payment processing.
+
 The runtime `402` response is authoritative for amount, network, asset,
 `payTo`, and Bazaar extensions. The static contract is available at
 `/openapi.json`. Errors use one strict envelope with a machine code,

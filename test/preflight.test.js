@@ -484,6 +484,105 @@ test("unpaid canonical audit returns a valid 0.05 USD Bazaar challenge", async t
   assert.equal(challenge.payment.bazaar.valid, true);
 });
 
+test("empty unauthenticated audit POST returns a challenge for method probes", async t => {
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/supported")) {
+      return jsonResponse({
+        kinds: [{ x402Version: 2, scheme: "exact", network: CONFIG.network }],
+        extensions: ["bazaar"],
+        signers: {},
+      });
+    }
+    return nativeFetch(url, init);
+  };
+  t.after(() => {
+    globalThis.fetch = nativeFetch;
+  });
+
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  for (const body of [undefined, "{}"]) {
+    const response = await nativeFetch(
+      `http://127.0.0.1:${server.address().port}/api/x402/preflight/audit`,
+      {
+        method: "POST",
+        redirect: "manual",
+        headers: body === undefined ? {} : { "content-type": "application/json" },
+        body,
+      },
+    );
+    assert.equal(response.status, 402);
+    const challenge = parseX402Challenge(response.headers, await response.text(), {
+      usdcContract: CONFIG.asset,
+    });
+    assert.equal(challenge.payment.amountAtomic, "50000");
+    assert.equal(challenge.payment.bazaar.valid, true);
+  }
+});
+
+test("empty audit POST with any recognized payment attempt still fails before payment", async t => {
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  for (const paymentHeader of [
+    "payment-signature",
+    "x-payment",
+    "payment",
+    "x-402-payment",
+    "x402-payment",
+  ]) {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}/api/x402/preflight/audit`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          [paymentHeader]: "not-a-payment",
+        },
+        body: "{}",
+      },
+    );
+    assert.equal(response.status, 400, paymentHeader);
+    assert.equal((await response.json()).error.code, "MISSING_REQUIRED_FIELD", paymentHeader);
+    assert.equal(response.headers.has("payment-required"), false, paymentHeader);
+  }
+});
+
+test("audit challenge probes reject noncanonical paths and unparsed request bodies", async t => {
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+
+  for (const request of [
+    {
+      path: "/api/x402/preflight/audit/extra",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      expectedCode: "MISSING_REQUIRED_FIELD",
+    },
+    {
+      path: "/api/x402/preflight/audit",
+      headers: { "content-type": "text/plain" },
+      body: "not-json",
+      expectedCode: "INVALID_REQUEST",
+    },
+  ]) {
+    const response = await fetch(
+      `http://127.0.0.1:${server.address().port}${request.path}`,
+      {
+        method: "POST",
+        headers: request.headers,
+        body: request.body,
+      },
+    );
+    assert.equal(response.status, 400, request.path);
+    assert.equal((await response.json()).error.code, request.expectedCode, request.path);
+    assert.equal(response.headers.has("payment-required"), false, request.path);
+  }
+});
+
 test("unpaid MCP audit call returns a valid Bazaar x402 challenge", async t => {
   const nativeFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
