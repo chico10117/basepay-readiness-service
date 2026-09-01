@@ -175,6 +175,13 @@ async function verifyPublicContracts(config) {
   if (auditQueryResponse.status !== 402) {
     throw new Error(`public GET audit returned HTTP ${auditQueryResponse.status}`);
   }
+  const auditQueryPaymentHeader = auditQueryResponse.headers.get("payment-required") ?? "";
+  const auditQueryPaymentHeaderBytes = Buffer.byteLength(auditQueryPaymentHeader, "utf8");
+  if (auditQueryPaymentHeaderBytes >= 8_000) {
+    throw new Error(
+      `public GET audit PAYMENT-REQUIRED header is too large: ${auditQueryPaymentHeaderBytes} bytes`,
+    );
+  }
   const auditQueryChallenge = parseX402Challenge(
     auditQueryResponse.headers,
     await auditQueryResponse.text(),
@@ -206,6 +213,7 @@ async function verifyPublicContracts(config) {
     challenge402: true,
     bazaar: true,
     queryAuditChallenge402: true,
+    queryAuditPaymentHeaderBytes: auditQueryPaymentHeaderBytes,
   };
 
   function get(path) {

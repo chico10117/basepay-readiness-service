@@ -176,7 +176,10 @@ POST /mcp  (initialize, tools/list, tools/call)
 The x402 resource server registers the Bazaar extension and publishes strict
 HTTP and MCP declarations for audit and remediation, including schemas and
 examples. The POST audit declaration uses a JSON body; the compatibility GET
-declaration uses Bazaar `queryParams` and the same report schema.
+declaration publishes compact Bazaar `queryParams` and summary-output contracts
+so the payment challenge remains safely below common header limits. OpenAPI
+documents the alias's full response schema, which is identical to the canonical
+audit.
 
 Use CDP Facilitator in production:
 

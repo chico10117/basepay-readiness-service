@@ -1,6 +1,8 @@
 import { declareDiscoveryExtension } from "@x402/extensions/bazaar";
 import {
   errorEnvelopeSchema,
+  PREFLIGHT_DECISIONS,
+  PREFLIGHT_QUERY_RESOURCE_URL_MAX_LENGTH,
   preflightInputSchema,
   preflightReportSchema,
   remediationInputSchema,
@@ -380,8 +382,8 @@ export function auditQueryHttpDiscoveryExtension(config) {
     inputSchema: schemaBody(preflightQueryInputSchema()),
     output: {
       type: "json",
-      schema: schemaBody(preflightReportSchema),
-      example: preflightReportExample(config),
+      schema: compactPreflightReportSchema(),
+      example: compactPreflightReportExample(config),
     },
   });
 }
@@ -518,6 +520,42 @@ export function preflightReportExample(config) {
   };
 }
 
+function compactPreflightReportSchema() {
+  return {
+    type: "object",
+    required: ["profile", "decision", "score", "requestId", "resource", "payment", "issues"],
+    properties: {
+      profile: { type: "string", enum: ["audit"] },
+      decision: { type: "string", enum: PREFLIGHT_DECISIONS },
+      score: { type: "integer", minimum: 0, maximum: 100 },
+      requestId: { type: "string" },
+      resource: { type: "object" },
+      payment: { type: "object" },
+      issues: { type: "array" },
+    },
+  };
+}
+
+function compactPreflightReportExample(config) {
+  return {
+    profile: "audit",
+    decision: "ALLOW",
+    score: 100,
+    requestId: "req_example1234",
+    resource: {
+      url: "https://example.com/api/resource",
+      method: "GET",
+      statusCode: 402,
+    },
+    payment: {
+      detected: true,
+      network: config.network,
+      priceUsd: 0.05,
+    },
+    issues: [],
+  };
+}
+
 function canonicalCapabilities(config) {
   return [
     {
@@ -566,6 +604,7 @@ function auditQueryCompatibility(config) {
 
 function preflightQueryInputSchema() {
   const schema = structuredClone(preflightInputSchema);
+  schema.properties.resource_url.maxLength = PREFLIGHT_QUERY_RESOURCE_URL_MAX_LENGTH;
   schema.properties.method = {
     ...schema.properties.method,
     enum: ["GET", "HEAD"],

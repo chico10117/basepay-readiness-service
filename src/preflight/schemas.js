@@ -1,6 +1,7 @@
 export const PREFLIGHT_DECISIONS = ["ALLOW", "CAUTION", "BLOCK", "UNKNOWN"];
 export const PREFLIGHT_CHECK_STATUSES = ["PASS", "WARN", "FAIL", "UNKNOWN"];
 export const PREFLIGHT_SEVERITIES = ["critical", "high", "medium", "low", "info"];
+export const PREFLIGHT_QUERY_RESOURCE_URL_MAX_LENGTH = 1024;
 
 const nullableString = { type: ["string", "null"] };
 const nullableNumber = { type: ["number", "null"] };
@@ -434,6 +435,16 @@ export function validatePreflightQuery(value, options = {}) {
       );
     }
     input[key] = rawValue.trim();
+  }
+
+  if (
+    typeof input.resource_url === "string" &&
+    input.resource_url.length > PREFLIGHT_QUERY_RESOURCE_URL_MAX_LENGTH
+  ) {
+    throw new PreflightInputError(
+      "QUERY_RESOURCE_URL_TOO_LONG",
+      `resource_url must be at most ${PREFLIGHT_QUERY_RESOURCE_URL_MAX_LENGTH} characters for the GET audit alias`,
+    );
   }
 
   if (Object.hasOwn(input, "max_price_usd")) {

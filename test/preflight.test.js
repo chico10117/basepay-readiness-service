@@ -144,6 +144,12 @@ test("strictly validates the paid audit query alias and blocks POST targets", ()
     () => validatePreflightQuery({ resource_url: "" }),
     /must not be empty|is required/i,
   );
+  assert.throws(
+    () => validatePreflightQuery({
+      resource_url: `https://example.com/${"a".repeat(1025)}`,
+    }),
+    error => error.code === "QUERY_RESOURCE_URL_TOO_LONG",
+  );
 });
 
 test("returns ALLOW for a valid affordable challenge with Bazaar metadata", async () => {
@@ -663,6 +669,52 @@ test("unpaid GET audit returns a valid query Bazaar challenge", async t => {
   assert.equal(challenge.payment.payTo.toLowerCase(), CONFIG.payTo.toLowerCase());
   assert.equal(challenge.payment.bazaar.method, "GET");
   assert.equal(challenge.payment.bazaar.valid, true);
+});
+
+test("GET audit challenge remains header-safe at the query URL limit", async t => {
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/supported")) {
+      return jsonResponse({
+        kinds: [{ x402Version: 2, scheme: "exact", network: CONFIG.network }],
+        extensions: ["bazaar"],
+        signers: {},
+      });
+    }
+    return nativeFetch(url, init);
+  };
+  t.after(() => {
+    globalThis.fetch = nativeFetch;
+  });
+
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const url = new URL(
+    "/api/x402/preflight/audit",
+    `http://127.0.0.1:${server.address().port}`,
+  );
+  const prefix = "https://example.com/";
+  url.searchParams.set("resource_url", `${prefix}${"a".repeat(1024 - prefix.length)}`);
+  url.searchParams.set("method", "GET");
+  const response = await nativeFetch(url, { method: "GET", redirect: "manual" });
+  assert.equal(response.status, 402);
+  const encoded = response.headers.get("payment-required");
+  assert.ok(encoded);
+  assert.ok(
+    Buffer.byteLength(encoded, "utf8") < 8_000,
+    `PAYMENT-REQUIRED header is ${Buffer.byteLength(encoded, "utf8")} bytes`,
+  );
+  const rawChallenge = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+  assert.deepEqual(
+    Object.keys(rawChallenge.extensions.bazaar.info.output.example).sort(),
+    ["decision", "issues", "payment", "profile", "requestId", "resource", "score"],
+  );
+  assert.equal(
+    rawChallenge.extensions.bazaar.schema.properties.input.properties.queryParams.properties
+      .resource_url.maxLength,
+    1024,
+  );
 });
 
 test("empty unauthenticated audit POST returns a challenge for method probes", async t => {

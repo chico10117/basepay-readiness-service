@@ -86,6 +86,13 @@ if (process.env.PUBLIC_URL) {
   if (queryResponse.status !== 402) {
     throw new Error(`public GET audit route returned HTTP ${queryResponse.status}, expected 402`);
   }
+  const queryPaymentHeader = queryResponse.headers.get("payment-required") ?? "";
+  const queryPaymentHeaderBytes = Buffer.byteLength(queryPaymentHeader, "utf8");
+  if (queryPaymentHeaderBytes >= 8_000) {
+    throw new Error(
+      `public GET audit PAYMENT-REQUIRED header is too large: ${queryPaymentHeaderBytes} bytes`,
+    );
+  }
   const queryChallenge = parseX402Challenge(
     queryResponse.headers,
     await queryResponse.text(),
@@ -105,6 +112,7 @@ if (process.env.PUBLIC_URL) {
     amountAtomic: queryChallenge.payment.amountAtomic,
     bazaarMethod: queryChallenge.payment.bazaar.method,
     bazaarValid: queryChallenge.payment.bazaar.valid,
+    paymentRequiredHeaderBytes: queryPaymentHeaderBytes,
   };
   output.cdpCatalog = await inspectCdpCatalog(config);
 }
