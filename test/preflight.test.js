@@ -195,6 +195,23 @@ test("returns ALLOW for a valid affordable challenge with Bazaar metadata", asyn
   assert.equal(report.resource.statusCode, 402);
 });
 
+test("defaults browser probes to the canonical service origin", async () => {
+  const previousProbeOrigin = process.env.PREFLIGHT_PROBE_ORIGIN;
+  delete process.env.PREFLIGHT_PROBE_ORIGIN;
+  try {
+    await inspectX402Endpoint(
+      input(),
+      inspectOptions(fakeTarget({ expectedProbeOrigin: CANONICAL_PUBLIC_URL })),
+    );
+  } finally {
+    if (previousProbeOrigin === undefined) {
+      delete process.env.PREFLIGHT_PROBE_ORIGIN;
+    } else {
+      process.env.PREFLIGHT_PROBE_ORIGIN = previousProbeOrigin;
+    }
+  }
+});
+
 test("returns CAUTION when Bazaar metadata is missing", async () => {
   const report = await inspectX402Endpoint(
     input(),
@@ -1322,6 +1339,12 @@ function fakeTarget(options = {}) {
   const challenge = validChallenge({ bazaar: options.bazaar !== false });
   return async (url, init) => {
     const parsed = new URL(url);
+    if (parsed.pathname === "/paid" && options.expectedProbeOrigin) {
+      assert.equal(
+        new Headers(init.headers).get("origin"),
+        options.expectedProbeOrigin,
+      );
+    }
     if (init.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
