@@ -31,7 +31,7 @@ const MAX_DURATION_MS = Math.max(
   Number(process.env.REVIEW_MAX_DURATION_SECONDS ?? "1800") * 1000,
 );
 const PUBLIC_URL = String(
-  process.env.PUBLIC_URL ?? "https://x402-wallet-readiness-service.vercel.app",
+  process.env.PUBLIC_URL || "https://x402.chikocorp.com",
 ).replace(/\/$/, "");
 const RUNTIME = serviceRuntime();
 const TELEMETRY = createTelemetry();

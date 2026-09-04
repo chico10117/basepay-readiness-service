@@ -163,7 +163,35 @@ const USE_CDP_FACILITATOR = process.env.X402_USE_CDP_FACILITATOR === "true";
 const ACTIVE_FACILITATOR_URL = USE_CDP_FACILITATOR
   ? coinbaseFacilitator.url
   : FACILITATOR_URL;
-const PUBLIC_URL = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL) : null;
+const DEFAULT_PUBLIC_URL = "https://x402.chikocorp.com";
+const DEFAULT_PUBLIC_URL_ALIASES = [
+  "https://x402-wallet-readiness-service.vercel.app",
+];
+const PUBLIC_URL = parsePublicUrl(process.env.PUBLIC_URL || DEFAULT_PUBLIC_URL);
+if (PUBLIC_URL.origin !== new URL(DEFAULT_PUBLIC_URL).origin) {
+  throw new Error(`PUBLIC_URL must remain ${DEFAULT_PUBLIC_URL}`);
+}
+const configuredPublicUrlAliases = parsePublicUrlList(
+  process.env.PUBLIC_URL_ALIASES,
+  DEFAULT_PUBLIC_URL_ALIASES,
+);
+assertExactOriginSet(
+  "PUBLIC_URL_ALIASES",
+  configuredPublicUrlAliases.map(url => url.origin),
+  DEFAULT_PUBLIC_URL_ALIASES,
+);
+const PUBLIC_URL_ALIASES = DEFAULT_PUBLIC_URL_ALIASES.map(parsePublicUrl);
+const PUBLIC_URL_BY_ORIGIN = new Map([[PUBLIC_URL.origin, PUBLIC_URL]]);
+for (const url of PUBLIC_URL_ALIASES) {
+  if (!PUBLIC_URL_BY_ORIGIN.has(url.origin)) PUBLIC_URL_BY_ORIGIN.set(url.origin, url);
+}
+const PUBLIC_URL_ORIGINS = [...PUBLIC_URL_BY_ORIGIN.keys()];
+const PUBLIC_URL_ORIGIN_SET = new Set(PUBLIC_URL_ORIGINS);
+const configuredMcpOrigins = process.env.MCP_ALLOWED_ORIGINS === undefined
+  ? PUBLIC_URL_ORIGINS
+  : parsePublicOriginList(process.env.MCP_ALLOWED_ORIGINS);
+assertExactOriginSet("MCP_ALLOWED_ORIGINS", configuredMcpOrigins, PUBLIC_URL_ORIGINS);
+const MCP_ALLOWED_ORIGINS = PUBLIC_URL_ORIGINS;
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "public");
 const MARKET_ALLOWED_PAIRS = new Set(["BTC-USD", "ETH-USD", "SOL-USD"]);
 const MARKET_CACHE = new Map();
@@ -194,6 +222,7 @@ const PAYMENT_REQUEST_HEADERS = [
   "X-402-Payment",
   "X402-PAYMENT",
   "X402-Payment",
+  "MCP-Protocol-Version",
 ];
 const PAYMENT_AUTHORIZATION_HEADERS = [
   "PAYMENT-SIGNATURE",
@@ -250,11 +279,14 @@ const requireL402Gateway = createL402GatewayGuard(L402_BACKEND_TOKEN);
 const limitL402BackendRequests = createL402BackendRateLimit(
   L402_BACKEND_RATE_LIMIT_PER_MINUTE,
 );
-app.set("trust proxy", true);
+app.set("trust proxy", 1);
 if (PUBLIC_URL) {
-  app.use((req, _res, next) => {
-    req.headers.host = PUBLIC_URL.host;
-    req.headers["x-forwarded-proto"] = PUBLIC_URL.protocol.replace(":", "");
+  app.use((req, res, next) => {
+    const requestUrl = publicUrlForRequest(req);
+    req.publicBaseUrl = requestUrl;
+    req.headers.host = requestUrl.host;
+    req.headers["x-forwarded-proto"] = requestUrl.protocol.replace(":", "");
+    res.vary("X-Forwarded-Host");
     next();
   });
 }
@@ -470,7 +502,7 @@ const serviceInfo = {
   },
 };
 
-app.get("/health", async (_req, res) => {
+app.get("/health", async (req, res) => {
   let settlementReconciler;
   try {
     settlementReconciler = {
@@ -508,6 +540,7 @@ app.get("/health", async (_req, res) => {
   res.json({
     status: degraded ? "degraded" : "ok",
     service: RUNTIME.service,
+    publicUrl: requestBaseUrl(req),
     version: RUNTIME.version,
     commitSha: RUNTIME.commitSha,
     deployedAt: RUNTIME.deployedAt,
@@ -523,16 +556,19 @@ app.get("/health", async (_req, res) => {
   });
 });
 
-app.get("/manifest", (_req, res) => {
-  res.json(buildPublicManifest(preflightConfig()));
+app.get("/manifest", (req, res) => {
+  res.json(buildPublicManifest(preflightConfig(requestBaseUrl(req))));
 });
 
-app.get("/openapi.json", (_req, res) => {
-  res.json(buildOpenApiDocument(preflightConfig()));
+app.get("/openapi.json", (req, res) => {
+  res.json(buildOpenApiDocument(preflightConfig(requestBaseUrl(req))));
 });
 
 app.use("/api/preflight/inspect", (req, res, next) => {
-  attachPaidRouteBrowserHeaders(req, res);
+  if (!attachPaidRouteBrowserHeaders(req, res)) {
+    rejectBrowserOrigin(res);
+    return;
+  }
   next();
 });
 
@@ -547,11 +583,13 @@ app.post(
 );
 
 app.get("/.well-known/agent-card.json", (req, res) => {
-  res.status(404).json(buildA2ANotImplemented(preflightConfig(), req.requestId));
+  res.status(404).json(
+    buildA2ANotImplemented(preflightConfig(requestBaseUrl(req)), req.requestId),
+  );
 });
 
-app.get("/.well-known/agent.json", (_req, res) => {
-  res.json(buildAgentMetadata(preflightConfig()));
+app.get("/.well-known/agent.json", (req, res) => {
+  res.json(buildAgentMetadata(preflightConfig(requestBaseUrl(req))));
 });
 
 app.get("/.well-known/l402.json", (_req, res) => {
@@ -586,7 +624,8 @@ app.post(
   },
 );
 
-app.get("/api/800402/preview", (_req, res) => {
+app.get("/api/800402/preview", (req, res) => {
+  const publicBaseUrl = requestBaseUrl(req);
   res.json({
     name: serviceInfo.name,
     version: serviceInfo.version,
@@ -598,15 +637,15 @@ app.get("/api/800402/preview", (_req, res) => {
       settlement: "native USDC on Base mainnet",
       facilitator: ACTIVE_FACILITATOR_URL,
     },
-    agent: agentIdentity(),
+    agent: agentIdentity(publicBaseUrl),
     payment: paymentInfo(),
     endpoints: {
       freePreview:
-        `${baseUrl()}/api/preview?address=${SAMPLE_ADDRESS}`,
+        `${publicBaseUrl}/api/preview?address=${SAMPLE_ADDRESS}`,
       paidReadiness:
-        `${baseUrl()}/api/readiness/${SAMPLE_ADDRESS}`,
+        `${publicBaseUrl}/api/readiness/${SAMPLE_ADDRESS}`,
       paidCommerceReceipt:
-        `${baseUrl()}/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
+        `${publicBaseUrl}/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
     },
   });
 });
@@ -681,7 +720,10 @@ app.post("/api/weather/current", async (req, res, next) => {
 
 app.post("/api/tools402/services/integration-triage", async (req, res, next) => {
   try {
-    res.json(buildTools402IntegrationTriageIntake(bodyToQuery(req.body)));
+    res.json(buildTools402IntegrationTriageIntake(
+      bodyToQuery(req.body),
+      requestBaseUrl(req),
+    ));
   } catch (error) {
     next(error);
   }
@@ -689,7 +731,10 @@ app.post("/api/tools402/services/integration-triage", async (req, res, next) => 
 
 app.post("/api/tools402/services/quick-review", async (req, res, next) => {
   try {
-    res.json(buildTools402QuickReviewIntake(bodyToQuery(req.body)));
+    res.json(buildTools402QuickReviewIntake(
+      bodyToQuery(req.body),
+      requestBaseUrl(req),
+    ));
   } catch (error) {
     next(error);
   }
@@ -697,7 +742,7 @@ app.post("/api/tools402/services/quick-review", async (req, res, next) => {
 
 app.get("/api/tools402/services/integration-triage", async (req, res, next) => {
   try {
-    res.json(buildTools402IntegrationTriageIntake(req.query));
+    res.json(buildTools402IntegrationTriageIntake(req.query, requestBaseUrl(req)));
   } catch (error) {
     next(error);
   }
@@ -705,7 +750,7 @@ app.get("/api/tools402/services/integration-triage", async (req, res, next) => {
 
 app.get("/api/tools402/services/quick-review", async (req, res, next) => {
   try {
-    res.json(buildTools402QuickReviewIntake(req.query));
+    res.json(buildTools402QuickReviewIntake(req.query, requestBaseUrl(req)));
   } catch (error) {
     next(error);
   }
@@ -757,24 +802,25 @@ app.post("/api/pyrimid/recommend", async (req, res, next) => {
   }
 });
 
-app.get("/.well-known/the402.json", (_req, res) => {
-  res.json(the402Manifest());
+app.get("/.well-known/the402.json", (req, res) => {
+  res.json(the402Manifest(requestBaseUrl(req)));
 });
 
-app.get("/api/the402/services", (_req, res) => {
-  res.json(the402Manifest());
+app.get("/api/the402/services", (req, res) => {
+  res.json(the402Manifest(requestBaseUrl(req)));
 });
 
-app.get("/api/the402/webhook", (_req, res) => {
+app.get("/api/the402/webhook", (req, res) => {
+  const publicBaseUrl = requestBaseUrl(req);
   res.json({
     ok: true,
     service: serviceInfo.name,
-    endpoint: `${baseUrl()}/api/the402/webhook`,
+    endpoint: `${publicBaseUrl}/api/the402/webhook`,
     expectedSignature: THE402_WEBHOOK_SECRET
       ? "X-Webhook-Signature HMAC-SHA256"
       : "not configured yet",
     events: ["job_dispatch", "thread_inquiry", "quote_request", "webhook_test"],
-    instantServices: the402ServiceDefinitions()
+    instantServices: the402ServiceDefinitions(publicBaseUrl)
       .filter((service) => service.fulfillment_type === "instant")
       .map((service) => service.name),
   });
@@ -788,11 +834,11 @@ app.post("/api/the402/webhook", async (req, res, next) => {
   }
 });
 
-app.get("/api/clawhunt/webhook", (_req, res) => {
+app.get("/api/clawhunt/webhook", (req, res) => {
   res.json({
     ok: true,
     service: "ClawHunt capability webhook",
-    endpoint: `${baseUrl()}/api/clawhunt/webhook`,
+    endpoint: `${requestBaseUrl(req)}/api/clawhunt/webhook`,
     supportedEvents: ["capability_probe", "task_assignment"],
     supportedProbeTypes: ["file_transfer", "visual_observation"],
   });
@@ -800,7 +846,7 @@ app.get("/api/clawhunt/webhook", (_req, res) => {
 
 app.post("/api/clawhunt/webhook", async (req, res, next) => {
   try {
-    res.json(await handleClawHuntWebhook(req.body));
+    res.json(await handleClawHuntWebhook(req.body, requestBaseUrl(req)));
   } catch (error) {
     next(error);
   }
@@ -820,12 +866,13 @@ async function previewReadiness(req, res, next) {
   }
 }
 
-app.get("/labs/legacy-agent-card.json", (_req, res) => {
+app.get("/labs/legacy-agent-card.json", (req, res) => {
+  const publicBaseUrl = requestBaseUrl(req);
   res.set("Deprecation", "true");
   res.json({
     name: serviceInfo.name,
     description: serviceInfo.description,
-    url: baseUrl(),
+    url: publicBaseUrl,
     provider: {
       name: "Codex Agent Wallet Payments Run",
       wallet: PAY_TO,
@@ -914,6 +961,7 @@ app.get("/labs/legacy-agent-card.json", (_req, res) => {
         payment: x402Info(
           "/api/x402/market/crypto-snapshot?limit=50",
           MARKET_SNAPSHOT_X402_PRICE,
+          publicBaseUrl,
         ),
         endpointUrl: "/api/x402/market/crypto-snapshot?limit=50",
         inputSchema: {
@@ -934,6 +982,7 @@ app.get("/labs/legacy-agent-card.json", (_req, res) => {
         payment: x402Info(
           "/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
           MARKET_OHLCV_X402_PRICE,
+          publicBaseUrl,
         ),
         endpointUrl: "/api/x402/market/ohlcv?pairs=BTC-USD,ETH-USD&days=365",
         inputSchema: {
@@ -980,6 +1029,7 @@ app.get("/labs/legacy-agent-card.json", (_req, res) => {
         payment: x402Info(
           "/api/x402/dev/repo-snapshot?repo=vercel/next.js",
           DEV_REPO_SNAPSHOT_X402_PRICE,
+          publicBaseUrl,
         ),
         endpointUrl: "/api/x402/dev/repo-snapshot?repo=vercel/next.js",
         inputSchema: {
@@ -1013,6 +1063,7 @@ app.get("/labs/legacy-agent-card.json", (_req, res) => {
         payment: x402Info(
           "/api/x402/weather/current?latitude=37.7749&longitude=-122.4194",
           WEATHER_CURRENT_X402_PRICE,
+          publicBaseUrl,
         ),
         endpointUrl: "/api/x402/weather/current?latitude=37.7749&longitude=-122.4194",
         inputSchema: weatherInputSchema(),
@@ -1024,6 +1075,7 @@ app.get("/labs/legacy-agent-card.json", (_req, res) => {
         payment: x402Info(
           "/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable",
           INTEGRATION_TRIAGE_X402_PRICE,
+          publicBaseUrl,
         ),
         endpointUrl:
           "/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable",
@@ -1122,19 +1174,20 @@ app.get("/labs/legacy-agent-card.json", (_req, res) => {
   });
 });
 
-app.get("/labs/legacy-agent.json", (_req, res) => {
+app.get("/labs/legacy-agent.json", (req, res) => {
+  const publicBaseUrl = requestBaseUrl(req);
   res.set("Deprecation", "true");
   res.json({
     name: serviceInfo.name,
     description:
       "Fixed-price Base USDC, x402, wallet-readiness, VPS, and agent QA implementation work.",
-    url: PUBLIC_URL?.toString() ?? "http://localhost:4021",
+    url: publicBaseUrl,
     version: serviceInfo.version,
     provider: {
       organization: serviceInfo.name,
       walletAddress: PAY_TO,
     },
-    erc8004: agentIdentity(),
+    erc8004: agentIdentity(publicBaseUrl),
     skills: [
       {
         id: "base-wallet-preview",
@@ -1284,29 +1337,29 @@ app.get("/labs/legacy-agent.json", (_req, res) => {
       },
     ],
     payment: paymentInfo(),
-    pyrimid: pyrimidInfo(),
-    x402: x402Info(`/api/readiness/${SAMPLE_ADDRESS}`),
+    pyrimid: pyrimidInfo(publicBaseUrl),
+    x402: x402Info(`/api/readiness/${SAMPLE_ADDRESS}`, PRICE, publicBaseUrl),
   });
 });
 
-app.get("/.well-known/x402", (_req, res) => {
-  res.json(buildX402Manifest(preflightConfig()));
+app.get("/.well-known/x402", (req, res) => {
+  res.json(buildX402Manifest(preflightConfig(requestBaseUrl(req))));
 });
 
-app.get("/.well-known/x402.json", (_req, res) => {
-  res.json(buildX402Manifest(preflightConfig()));
+app.get("/.well-known/x402.json", (req, res) => {
+  res.json(buildX402Manifest(preflightConfig(requestBaseUrl(req))));
 });
 
-app.get("/.well-known/ai.txt", (_req, res) => {
-  res.type("text/plain").send(buildAiTxt(preflightConfig()));
+app.get("/.well-known/ai.txt", (req, res) => {
+  res.type("text/plain").send(buildAiTxt(preflightConfig(requestBaseUrl(req))));
 });
 
 app.get("/.well-known/402index-verify.txt", (_req, res) => {
   res.type("text/plain").send(`${FOUR_O_TWO_INDEX_VERIFICATION_HASH}\n`);
 });
 
-app.get("/llms.txt", (_req, res) => {
-  res.type("text/plain").send(buildLlmsTxt(preflightConfig()));
+app.get("/llms.txt", (req, res) => {
+  res.type("text/plain").send(buildLlmsTxt(preflightConfig(requestBaseUrl(req))));
 });
 
 app.get("/wallet-sign", (_req, res) => {
@@ -1317,12 +1370,15 @@ app.get("/xmtp-bounty-dm", (_req, res) => {
   res.sendFile(join(PUBLIC_DIR, "xmtp-bounty-dm.html"));
 });
 
-app.get("/open-frame", (_req, res) => {
-  res.type("html").send(openFrameHtml());
+app.get("/open-frame", (req, res) => {
+  res.type("html").send(openFrameHtml({ publicBaseUrl: requestBaseUrl(req) }));
 });
 
-app.post("/open-frame", (_req, res) => {
-  res.type("html").send(openFrameHtml({ refreshed: true }));
+app.post("/open-frame", (req, res) => {
+  res.type("html").send(openFrameHtml({
+    publicBaseUrl: requestBaseUrl(req),
+    refreshed: true,
+  }));
 });
 
 app.get("/favicon.ico", (_req, res) => {
@@ -1331,7 +1387,10 @@ app.get("/favicon.ico", (_req, res) => {
 
 app.use(express.static(PUBLIC_DIR));
 
-app.use(createMcpOriginMiddleware({ baseUrl: baseUrl() }));
+app.use(createMcpOriginMiddleware({
+  baseUrl: baseUrl(),
+  allowedOrigins: MCP_ALLOWED_ORIGINS.join(","),
+}));
 app.use(createMcpTransportMiddleware());
 app.use(createMcpPaidToolValidator({
   network: NETWORK,
@@ -1349,7 +1408,10 @@ app.use((req, res, next) => {
     return;
   }
 
-  attachPaidRouteBrowserHeaders(req, res);
+  if (!attachPaidRouteBrowserHeaders(req, res)) {
+    rejectBrowserOrigin(res);
+    return;
+  }
   forcePaidRouteFinalHeaders(req, res);
 
   if (req.method === "OPTIONS") {
@@ -1420,7 +1482,22 @@ app.use(async (req, res, next) => {
   }
 });
 
-const paidRouteConfigs = withHeadPaymentRoutes({
+const paidRouteMiddlewares = new Map(
+  [...PUBLIC_URL_BY_ORIGIN.values()].map(publicUrl => [
+    publicBaseUrlString(publicUrl),
+    paymentMiddleware(
+      createPaidRouteConfigs(publicUrl),
+      resourceServer,
+      undefined,
+      undefined,
+      false,
+    ),
+  ]),
+);
+
+function createPaidRouteConfigs(publicBaseUrl) {
+  const config = preflightConfig(publicBaseUrl.toString().replace(/\/$/, ""));
+  return withHeadPaymentRoutes({
       "GET /api/x402/preflight/audit": {
         accepts: [
           {
@@ -1433,7 +1510,7 @@ const paidRouteConfigs = withHeadPaymentRoutes({
         description:
           "Compatibility GET alias for a deep x402 endpoint audit. Requires resource_url in the query string and only audits GET or HEAD targets.",
         mimeType: "application/json",
-        extensions: auditQueryHttpDiscoveryExtension(preflightConfig()),
+        extensions: auditQueryHttpDiscoveryExtension(config),
       },
       "POST /api/x402/preflight/audit": {
         accepts: [
@@ -1447,7 +1524,7 @@ const paidRouteConfigs = withHeadPaymentRoutes({
         description:
           "Deeply validate an unfamiliar x402 endpoint before an agent spends USDC: requirements schema, policy, discovery, redirects, CORS, cache, and operational signals.",
         mimeType: "application/json",
-        extensions: auditHttpDiscoveryExtension(preflightConfig()),
+        extensions: auditHttpDiscoveryExtension(config),
       },
       "POST /api/x402/preflight/remediation": {
         accepts: [
@@ -1461,7 +1538,7 @@ const paidRouteConfigs = withHeadPaymentRoutes({
         description:
           "Create a durable x402 remediation order after a failed or risky preflight audit.",
         mimeType: "application/json",
-        extensions: remediationHttpDiscoveryExtension(preflightConfig()),
+        extensions: remediationHttpDiscoveryExtension(config),
       },
       "GET /api/readiness": {
         accepts: [
@@ -1588,6 +1665,7 @@ const paidRouteConfigs = withHeadPaymentRoutes({
           "Paid quick Base USDC/x402 readback intake. Returns a focused order receipt, proof requirements, and review instructions.",
         mimeType: "application/json",
         extensions: integrationTriageDiscoveryExtension({
+          publicBaseUrl: config.baseUrl,
           service: "Base USDC x402 Quick Review",
           price: QUICK_REVIEW_X402_PRICE,
           sla: "12h from paid intake",
@@ -1607,6 +1685,7 @@ const paidRouteConfigs = withHeadPaymentRoutes({
           "Paid quick Base USDC/x402 readback intake. Accepts JSON body fields and returns a focused order receipt, proof requirements, and review instructions.",
         mimeType: "application/json",
         extensions: integrationTriageDiscoveryExtension({
+          publicBaseUrl: config.baseUrl,
           method: "POST",
           service: "Base USDC x402 Quick Review",
           price: QUICK_REVIEW_X402_PRICE,
@@ -1626,7 +1705,7 @@ const paidRouteConfigs = withHeadPaymentRoutes({
         description:
           "Paid same-day Base USDC/x402 integration triage intake. Returns a 24h order receipt, proof requirements, and delivery instructions.",
         mimeType: "application/json",
-        extensions: integrationTriageDiscoveryExtension(),
+        extensions: integrationTriageDiscoveryExtension({ publicBaseUrl: config.baseUrl }),
       },
       "POST /api/x402/services/integration-triage": {
         accepts: [
@@ -1640,52 +1719,62 @@ const paidRouteConfigs = withHeadPaymentRoutes({
         description:
           "Paid same-day Base USDC/x402 integration triage intake. Accepts JSON body fields and returns a 24h order receipt, proof requirements, and delivery instructions.",
         mimeType: "application/json",
-        extensions: integrationTriageDiscoveryExtension({ method: "POST" }),
+        extensions: integrationTriageDiscoveryExtension({
+          publicBaseUrl: config.baseUrl,
+          method: "POST",
+        }),
       },
     });
+}
 
-const mcpAuditPaymentMiddleware = paymentMiddleware(
-  {
-    "POST /mcp": {
-      accepts: [{
-        scheme: "exact",
-        price: PREFLIGHT_AUDIT_X402_PRICE,
-        network: NETWORK,
-        payTo: PAY_TO,
-      }],
-      resource: `${baseUrl()}/mcp#audit_x402_endpoint`,
-      description:
-        "MCP audit_x402_endpoint: deep read-only validation before an agent spends USDC.",
-      mimeType: "application/json",
-      extensions: auditMcpDiscoveryExtension(preflightConfig()),
-    },
-  },
-  resourceServer,
-  undefined,
-  undefined,
-  false,
-);
-
-const mcpRemediationPaymentMiddleware = paymentMiddleware(
-  {
-    "POST /mcp": {
-      accepts: [{
-        scheme: "exact",
-        price: REMEDIATION_X402_PRICE,
-        network: NETWORK,
-        payTo: PAY_TO,
-      }],
-      resource: `${baseUrl()}/mcp#order_x402_remediation`,
-      description:
-        "MCP order_x402_remediation: create a durable remediation intake after an x402 audit.",
-      mimeType: "application/json",
-      extensions: remediationMcpDiscoveryExtension(preflightConfig()),
-    },
-  },
-  resourceServer,
-  undefined,
-  undefined,
-  false,
+const mcpPaymentMiddlewares = new Map(
+  [...PUBLIC_URL_BY_ORIGIN.values()].map(publicUrl => {
+    const config = preflightConfig(publicUrl.toString().replace(/\/$/, ""));
+    return [publicBaseUrlString(publicUrl), {
+      audit: paymentMiddleware(
+        {
+          "POST /mcp": {
+            accepts: [{
+              scheme: "exact",
+              price: PREFLIGHT_AUDIT_X402_PRICE,
+              network: NETWORK,
+              payTo: PAY_TO,
+            }],
+            resource: `${config.baseUrl}/mcp#audit_x402_endpoint`,
+            description:
+              "MCP audit_x402_endpoint: deep read-only validation before an agent spends USDC.",
+            mimeType: "application/json",
+            extensions: auditMcpDiscoveryExtension(config),
+          },
+        },
+        resourceServer,
+        undefined,
+        undefined,
+        false,
+      ),
+      remediation: paymentMiddleware(
+        {
+          "POST /mcp": {
+            accepts: [{
+              scheme: "exact",
+              price: REMEDIATION_X402_PRICE,
+              network: NETWORK,
+              payTo: PAY_TO,
+            }],
+            resource: `${config.baseUrl}/mcp#order_x402_remediation`,
+            description:
+              "MCP order_x402_remediation: create a durable remediation intake after an x402 audit.",
+            mimeType: "application/json",
+            extensions: remediationMcpDiscoveryExtension(config),
+          },
+        },
+        resourceServer,
+        undefined,
+        undefined,
+        false,
+      ),
+    }];
+  }),
 );
 
 app.use(async (req, res, next) => {
@@ -1718,9 +1807,11 @@ app.use(async (req, res, next) => {
 
   try {
     await initializeResourceServer();
+    const hostMiddlewares = mcpPaymentMiddlewares.get(requestBaseUrl(req))
+      ?? mcpPaymentMiddlewares.get(baseUrl());
     const middleware = toolName === "audit_x402_endpoint"
-      ? mcpAuditPaymentMiddleware
-      : mcpRemediationPaymentMiddleware;
+      ? hostMiddlewares.audit
+      : hostMiddlewares.remediation;
     await middleware(req, res, next);
   } catch (error) {
     resourceServerInitPromise = null;
@@ -1741,15 +1832,11 @@ app.use(async (req, res, next) => {
   }
 });
 
-app.use(
-  paymentMiddleware(
-    paidRouteConfigs,
-    resourceServer,
-    undefined,
-    undefined,
-    false,
-  ),
-);
+app.use((req, res, next) => {
+  const middleware = paidRouteMiddlewares.get(requestBaseUrl(req))
+    ?? paidRouteMiddlewares.get(baseUrl());
+  return middleware(req, res, next);
+});
 
 app.post("/api/x402/preflight/audit", preflightHandlers.audit);
 app.get("/api/x402/preflight/audit", preflightHandlers.audit);
@@ -1800,7 +1887,7 @@ app.get("/api/readiness/:address", async (req, res, next) => {
 app.get("/api/agent-commerce-receipt", async (req, res, next) => {
   try {
     const report = await buildReadinessReport(String(req.query.address ?? ""));
-    res.json(buildAgentCommerceReceipt(report));
+    res.json(buildAgentCommerceReceipt(report, requestBaseUrl(req)));
   } catch (error) {
     next(error);
   }
@@ -1809,7 +1896,7 @@ app.get("/api/agent-commerce-receipt", async (req, res, next) => {
 app.get("/api/agent-commerce-receipt/:address", async (req, res, next) => {
   try {
     const report = await buildReadinessReport(req.params.address);
-    res.json(buildAgentCommerceReceipt(report));
+    res.json(buildAgentCommerceReceipt(report, requestBaseUrl(req)));
   } catch (error) {
     next(error);
   }
@@ -1985,10 +2072,10 @@ function paidRoutePrice(pathname) {
   return PRICE;
 }
 
-function preflightConfig() {
+function preflightConfig(publicBaseUrl = baseUrl()) {
   return {
     technicalName: "base-wallet-readiness-service",
-    baseUrl: baseUrl(),
+    baseUrl: publicBaseUrl,
     version: RUNTIME.version,
     network: NETWORK,
     asset: USDC_CONTRACT,
@@ -2096,28 +2183,26 @@ function withHeadPaymentRoutes(routes) {
 }
 
 function attachPaidRouteBrowserHeaders(req, res) {
-  const origin = req.get("origin");
-  res.set("Access-Control-Allow-Origin", origin || "*");
-  if (origin) {
-    res.vary("Origin");
-  }
-  res.vary("Access-Control-Request-Headers");
-  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", corsAllowHeaders(req));
-  res.set("Access-Control-Expose-Headers", PAYMENT_RESPONSE_HEADERS.join(", "));
+  const origin = String(req.get("origin") ?? "").trim();
+  res.vary("Origin");
   res.set("Cache-Control", "private, no-store");
   res.set("Pragma", "no-cache");
   res.set("Expires", "0");
+  if (origin && !PUBLIC_URL_ORIGIN_SET.has(origin)) return false;
+
+  res.set("Access-Control-Allow-Origin", origin || "*");
+  res.set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", corsAllowHeaders());
+  res.set("Access-Control-Expose-Headers", PAYMENT_RESPONSE_HEADERS.join(", "));
+  return true;
 }
 
-function corsAllowHeaders(req) {
-  return uniqueHeaderList([
-    ...PAYMENT_REQUEST_HEADERS,
-    ...String(req.get("access-control-request-headers") ?? "")
-      .split(",")
-      .map(header => header.trim())
-      .filter(Boolean),
-  ]);
+function corsAllowHeaders() {
+  return uniqueHeaderList(PAYMENT_REQUEST_HEADERS);
+}
+
+function rejectBrowserOrigin(res) {
+  res.status(403).json({ error: "Origin is not allowed for this browser endpoint" });
 }
 
 function hasPaymentAttemptHeader(req) {
@@ -2498,6 +2583,7 @@ async function handleThe402Webhook(req) {
   const payload = objectValue(req.body);
   const eventType = String(payload.event ?? payload.type ?? "webhook_test");
   const normalizedEvent = eventType.toLowerCase();
+  const publicBaseUrl = requestBaseUrl(req);
 
   if (THE402_WEBHOOK_SECRET) {
     verifyThe402Signature(req);
@@ -2511,18 +2597,18 @@ async function handleThe402Webhook(req) {
     return {
       received: true,
       event: eventType,
-      webhook: `${baseUrl()}/api/the402/webhook`,
+      webhook: `${publicBaseUrl}/api/the402/webhook`,
       secretConfigured: Boolean(THE402_WEBHOOK_SECRET),
-      services: the402ServiceDefinitions().map((service) => service.name),
+      services: the402ServiceDefinitions(publicBaseUrl).map((service) => service.name),
     };
   }
 
   if (normalizedEvent === "job_dispatch") {
-    return handleThe402JobDispatch(payload);
+    return handleThe402JobDispatch(payload, publicBaseUrl);
   }
 
   if (["thread_inquiry", "quote_request"].includes(normalizedEvent)) {
-    return handleThe402Inquiry(payload, normalizedEvent);
+    return handleThe402Inquiry(payload, normalizedEvent, publicBaseUrl);
   }
 
   return {
@@ -2532,7 +2618,7 @@ async function handleThe402Webhook(req) {
   };
 }
 
-async function handleClawHuntWebhook(payload) {
+async function handleClawHuntWebhook(payload, publicBaseUrl = baseUrl()) {
   const body = objectValue(payload);
   const eventType = String(body.event_type ?? body.event ?? body.type ?? "");
   const probeType = String(body.probe_type ?? body.payload?.probe_type ?? "");
@@ -2550,7 +2636,7 @@ async function handleClawHuntWebhook(payload) {
       received: true,
       event_type: eventType,
       status: "acknowledged",
-      webhook: `${baseUrl()}/api/clawhunt/webhook`,
+      webhook: `${publicBaseUrl}/api/clawhunt/webhook`,
     };
   }
 
@@ -2646,10 +2732,14 @@ function requiredProbeUrl(value, field) {
   return url;
 }
 
-async function handleThe402JobDispatch(payload) {
+async function handleThe402JobDispatch(payload, publicBaseUrl = baseUrl()) {
   const serviceKey = inferThe402ServiceKey(payload);
   const brief = the402Brief(payload);
-  const deliverables = await buildThe402Deliverables(serviceKey, brief);
+  const deliverables = await buildThe402Deliverables(
+    serviceKey,
+    brief,
+    publicBaseUrl,
+  );
   const callback =
     deliverables.autoComplete === true
       ? await maybePostThe402JobUpdate(payload, deliverables)
@@ -2666,9 +2756,9 @@ async function handleThe402JobDispatch(payload) {
   };
 }
 
-function handleThe402Inquiry(payload, normalizedEvent) {
+function handleThe402Inquiry(payload, normalizedEvent, publicBaseUrl = baseUrl()) {
   const serviceKey = inferThe402ServiceKey(payload);
-  const quote = buildThe402Quote(serviceKey, payload);
+  const quote = buildThe402Quote(serviceKey, payload, publicBaseUrl);
 
   return {
     received: true,
@@ -2680,7 +2770,7 @@ function handleThe402Inquiry(payload, normalizedEvent) {
   };
 }
 
-async function buildThe402Deliverables(serviceKey, brief) {
+async function buildThe402Deliverables(serviceKey, brief, publicBaseUrl = baseUrl()) {
   if (serviceKey === "crypto_snapshot") {
     const report = await buildCryptoSnapshotFeed({
       limit: brief.limit ?? brief.assets ?? 50,
@@ -2739,9 +2829,9 @@ async function buildThe402Deliverables(serviceKey, brief) {
       "Implementation request accepted for manual review. The provider will scope, execute, and return proof through the402 job thread.",
     requestedWork: brief,
     publicProof: {
-      serviceManifest: `${baseUrl()}/manifest`,
-      x402Manifest: `${baseUrl()}/.well-known/x402.json`,
-      the402Manifest: `${baseUrl()}/.well-known/the402.json`,
+      serviceManifest: `${publicBaseUrl}/manifest`,
+      x402Manifest: `${publicBaseUrl}/.well-known/x402.json`,
+      the402Manifest: `${publicBaseUrl}/.well-known/the402.json`,
     },
   };
 }
@@ -2777,12 +2867,12 @@ async function maybePostThe402JobUpdate(payload, deliverables) {
   };
 }
 
-function buildThe402Quote(serviceKey, payload) {
+function buildThe402Quote(serviceKey, payload, publicBaseUrl = baseUrl()) {
   const service =
-    the402ServiceDefinitions().find((definition) =>
+    the402ServiceDefinitions(publicBaseUrl).find((definition) =>
       inferThe402ServiceKey(definition) === serviceKey
     ) ??
-    the402ServiceDefinitions().find((definition) =>
+    the402ServiceDefinitions(publicBaseUrl).find((definition) =>
       inferThe402ServiceKey(definition) === "implementation_triage"
     );
 
@@ -2886,18 +2976,18 @@ function inferThe402ServiceKey(payload) {
   return "implementation_triage";
 }
 
-function the402Manifest() {
+function the402Manifest(publicBaseUrl = baseUrl()) {
   return {
     name: serviceInfo.name,
     provider_wallet: PAY_TO,
     network: "base",
     settlement_asset: "USDC",
     dashboard_url: "https://the402.ai/dashboard",
-    webhook_url: `${baseUrl()}/api/the402/webhook`,
-    webhook_health: `${baseUrl()}/api/the402/webhook`,
-    source_manifest: `${baseUrl()}/manifest`,
-    x402_manifest: `${baseUrl()}/.well-known/x402.json`,
-    services: the402ServiceDefinitions(),
+    webhook_url: `${publicBaseUrl}/api/the402/webhook`,
+    webhook_health: `${publicBaseUrl}/api/the402/webhook`,
+    source_manifest: `${publicBaseUrl}/manifest`,
+    x402_manifest: `${publicBaseUrl}/.well-known/x402.json`,
+    services: the402ServiceDefinitions(publicBaseUrl),
     secrets: {
       requiredForProduction: ["THE402_WEBHOOK_SECRET", "THE402_API_KEY"],
       custody: "No target wallet seed phrase or private key is required.",
@@ -2905,8 +2995,8 @@ function the402Manifest() {
   };
 }
 
-function the402ServiceDefinitions() {
-  const webhookUrl = `${baseUrl()}/api/the402/webhook`;
+function the402ServiceDefinitions(publicBaseUrl = baseUrl()) {
+  const webhookUrl = `${publicBaseUrl}/api/the402/webhook`;
   return [
     {
       name: "Top Crypto Price Snapshot API",
@@ -3046,7 +3136,7 @@ function the402ServiceDefinitions() {
       category: "development",
       tags: ["x402", "base", "usdc", "review", "debugging"],
       webhook_url: webhookUrl,
-      purchase_url: `${baseUrl()}/api/x402/services/quick-review`,
+      purchase_url: `${publicBaseUrl}/api/x402/services/quick-review`,
       input_schema: integrationTriageInputSchema(),
       deliverable_schema: {
         type: "object",
@@ -3070,7 +3160,7 @@ function the402ServiceDefinitions() {
       category: "development",
       tags: ["x402", "base", "usdc", "integration", "debugging"],
       webhook_url: webhookUrl,
-      purchase_url: `${baseUrl()}/api/x402/services/integration-triage`,
+      purchase_url: `${publicBaseUrl}/api/x402/services/integration-triage`,
       input_schema: integrationTriageInputSchema(),
       deliverable_schema: {
         type: "object",
@@ -3527,7 +3617,7 @@ function buildRemediationOrder(query, paymentFingerprint = "") {
   return receipt;
 }
 
-function buildTools402QuickReviewIntake(query) {
+function buildTools402QuickReviewIntake(query, publicBaseUrl = baseUrl()) {
   const request = parseIntegrationTriageRequest(query);
   const acceptedAt = new Date().toISOString();
   const orderId = createHash("sha256")
@@ -3569,16 +3659,16 @@ function buildTools402QuickReviewIntake(query) {
     provider: {
       name: serviceInfo.name,
       wallet: PAY_TO,
-      publicServiceUrl: baseUrl(),
-      directX402Endpoint: `${baseUrl()}/api/x402/services/quick-review`,
-      tools402Upstream: `${baseUrl()}/api/tools402/services/quick-review`,
+      publicServiceUrl: publicBaseUrl,
+      directX402Endpoint: `${publicBaseUrl}/api/x402/services/quick-review`,
+      tools402Upstream: `${publicBaseUrl}/api/tools402/services/quick-review`,
       issueTemplate:
         "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
     },
   };
 }
 
-function buildTools402IntegrationTriageIntake(query) {
+function buildTools402IntegrationTriageIntake(query, publicBaseUrl = baseUrl()) {
   const request = parseIntegrationTriageRequest(query);
   const acceptedAt = new Date().toISOString();
   const orderId = createHash("sha256")
@@ -3621,9 +3711,11 @@ function buildTools402IntegrationTriageIntake(query) {
     provider: {
       name: serviceInfo.name,
       wallet: PAY_TO,
-      publicServiceUrl: baseUrl(),
-      directX402Endpoint: `${baseUrl()}/api/x402/services/integration-triage`,
-      tools402Upstream: `${baseUrl()}/api/tools402/services/integration-triage`,
+      publicServiceUrl: publicBaseUrl,
+      directX402Endpoint:
+        `${publicBaseUrl}/api/x402/services/integration-triage`,
+      tools402Upstream:
+        `${publicBaseUrl}/api/tools402/services/integration-triage`,
       issueTemplate:
         "https://github.com/chico10117/basepay-readiness-service/issues/new?template=paid-work-request.yml",
     },
@@ -4308,13 +4400,17 @@ function toPreview(report) {
   };
 }
 
-function buildAgentCommerceReceipt(report) {
+function buildAgentCommerceReceipt(report, publicBaseUrl = baseUrl()) {
   return {
     receiptType: "800402-agent-commerce-readiness",
     generatedAt: new Date().toISOString(),
-    agent: agentIdentity(),
+    agent: agentIdentity(publicBaseUrl),
     payment: paymentInfo(),
-    x402: x402Info(`/api/agent-commerce-receipt/${report.address}`),
+    x402: x402Info(
+      `/api/agent-commerce-receipt/${report.address}`,
+      PRICE,
+      publicBaseUrl,
+    ),
     subject: {
       wallet: report.address,
       network: "Base",
@@ -4322,10 +4418,11 @@ function buildAgentCommerceReceipt(report) {
     },
     readinessReport: report,
     proof: {
-      metadataUrl: `${baseUrl()}/.well-known/agent.json`,
-      agentCardUrl: `${baseUrl()}/.well-known/agent-card.json`,
-      freePreviewUrl: `${baseUrl()}/api/preview/${report.address}`,
-      protectedReceiptUrl: `${baseUrl()}/api/agent-commerce-receipt/${report.address}`,
+      metadataUrl: `${publicBaseUrl}/.well-known/agent.json`,
+      agentCardUrl: `${publicBaseUrl}/.well-known/agent-card.json`,
+      freePreviewUrl: `${publicBaseUrl}/api/preview/${report.address}`,
+      protectedReceiptUrl:
+        `${publicBaseUrl}/api/agent-commerce-receipt/${report.address}`,
       verifierChecklist: [
         "HTTP 402 challenge returns Base mainnet x402 payment requirements",
         "payTo matches the published receiving wallet",
@@ -4336,51 +4433,54 @@ function buildAgentCommerceReceipt(report) {
   };
 }
 
-function agentIdentity() {
+function agentIdentity(publicBaseUrl = baseUrl()) {
   return {
     standard: "erc-8004-ready",
     status: "metadata_published",
     name: serviceInfo.name,
     agentWallet: PAY_TO,
-    agentUri: `${baseUrl()}/.well-known/agent.json`,
-    agentCardUri: `${baseUrl()}/.well-known/agent-card.json`,
+    agentUri: `${publicBaseUrl}/.well-known/agent.json`,
+    agentCardUri: `${publicBaseUrl}/.well-known/agent-card.json`,
     services: [
       {
         name: "Base wallet readiness",
         transport: "https",
         payment: "x402",
-        endpoint: `${baseUrl()}/api/readiness/${SAMPLE_ADDRESS}`,
+        endpoint: `${publicBaseUrl}/api/readiness/${SAMPLE_ADDRESS}`,
       },
       {
         name: "800402 agent commerce receipt",
         transport: "https",
         payment: "x402",
-        endpoint: `${baseUrl()}/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
+        endpoint:
+          `${publicBaseUrl}/api/agent-commerce-receipt/${SAMPLE_ADDRESS}`,
       },
       {
         name: "Target wallet signature helper",
         transport: "https",
         payment: "free",
-        endpoint: `${baseUrl()}/wallet-sign`,
+        endpoint: `${publicBaseUrl}/wallet-sign`,
       },
       {
         name: "Pyrimid product recommendations",
         transport: "https",
         payment: "free",
-        endpoint: `${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3`,
+        endpoint:
+          `${publicBaseUrl}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3`,
       },
       {
         name: "GitHub repo intelligence snapshot",
         transport: "https",
         payment: "x402",
-        endpoint: `${baseUrl()}/api/x402/dev/repo-snapshot?repo=vercel/next.js`,
+        endpoint:
+          `${publicBaseUrl}/api/x402/dev/repo-snapshot?repo=vercel/next.js`,
       },
     ],
     supportedTrust: ["erc-8004", "x402", "base-usdc"],
   };
 }
 
-function pyrimidInfo() {
+function pyrimidInfo(publicBaseUrl = baseUrl()) {
   return {
     sdk: "@pyrimid/sdk",
     integrationPath: "embedded_resolver",
@@ -4388,7 +4488,7 @@ function pyrimidInfo() {
     affiliateId: PYRIMID_AFFILIATE_ID,
     payoutWallet: PAY_TO,
     recommendationEndpoint:
-      `${baseUrl()}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3`,
+      `${publicBaseUrl}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3`,
     docs: "https://pyrimid.ai/quickstart",
   };
 }
@@ -4405,9 +4505,9 @@ function paymentInfo() {
   };
 }
 
-function x402Info(path, price = PRICE) {
+function x402Info(path, price = PRICE, publicBaseUrl = baseUrl()) {
   return {
-    endpoint: `${baseUrl()}${path}`,
+    endpoint: `${publicBaseUrl}${path}`,
     method: "GET",
     priceUsd: priceUsd(price),
     asset: USDC_CONTRACT,
@@ -4707,6 +4807,7 @@ function integrationTriageDiscoveryExtension({
   price = INTEGRATION_TRIAGE_X402_PRICE,
   sla = "24h from paid intake",
   goal = "Make the x402 Base USDC endpoint browser-agent readable and ready for marketplace listing.",
+  publicBaseUrl = baseUrl(),
 } = {}) {
   return declareDiscoveryExtension({
     method,
@@ -4738,8 +4839,8 @@ function integrationTriageDiscoveryExtension({
         },
         review: {
           status: "awaiting_settlement",
-          statusUrl: "https://x402-wallet-readiness-service.vercel.app/api/x402/orders/triage-example",
-          resultUrl: "https://x402-wallet-readiness-service.vercel.app/api/x402/orders/triage-example/result",
+          statusUrl: `${publicBaseUrl}/api/x402/orders/triage-example`,
+          resultUrl: `${publicBaseUrl}/api/x402/orders/triage-example/result`,
           estimatedCompletionMinutes: service.includes("Integration") ? 30 : 15,
         },
       },
@@ -4911,12 +5012,108 @@ function x402Accept(price = PRICE) {
   };
 }
 
+function parsePublicUrl(value) {
+  const text = String(value ?? "").trim();
+  if (!text) throw new Error("PUBLIC_URL must be a non-empty URL");
+  const url = new URL(text);
+  if (url.protocol !== "https:") {
+    throw new Error("PUBLIC_URL must use HTTPS");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("PUBLIC_URL must not contain credentials, query parameters, or fragments");
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+  if (url.pathname !== "/") {
+    throw new Error("PUBLIC_URL must not contain a path");
+  }
+  return url;
+}
+
+function parsePublicUrlList(value, defaults = []) {
+  const text = String(value ?? "").trim();
+  const values = value === undefined ? defaults : text ? text.split(",") : [];
+  const seen = new Set();
+  const urls = [];
+  for (const candidate of values) {
+    if (!String(candidate).trim()) continue;
+    const url = parsePublicUrl(candidate);
+    if (seen.has(url.origin)) continue;
+    seen.add(url.origin);
+    urls.push(url);
+  }
+  return urls;
+}
+
+function parsePublicOriginList(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return [];
+  return [...new Set(text.split(",").map(candidate => parsePublicUrl(candidate).origin))];
+}
+
+function assertExactOriginSet(name, actualOrigins, expectedValues) {
+  const actual = [...new Set(actualOrigins)].sort();
+  const expected = [
+    ...new Set(expectedValues.map(value => parsePublicUrl(value).origin)),
+  ].sort();
+  if (
+    actual.length !== expected.length ||
+    actual.some((origin, index) => origin !== expected[index])
+  ) {
+    throw new Error(`${name} must contain exactly: ${expected.join(",")}`);
+  }
+}
+
+function publicUrlForRequest(req) {
+  if (req.publicBaseUrl) return req.publicBaseUrl;
+  const directHost = String(req.get("host") ?? "").trim();
+  const directUrl = publicUrlForHost(directHost);
+  if (directUrl) return directUrl;
+
+  const forwardedHost = String(req.get("x-forwarded-host") ?? "").trim();
+  if (forwardedHost && !forwardedHost.includes(",")) {
+    const forwardedUrl = publicUrlForHost(forwardedHost);
+    if (forwardedUrl) return forwardedUrl;
+  }
+  return PUBLIC_URL;
+}
+
+function publicUrlForHost(value) {
+  const host = String(value ?? "").trim();
+  if (!host || /[\\/@?#\s]/.test(host)) return null;
+  for (const publicUrl of PUBLIC_URL_BY_ORIGIN.values()) {
+    try {
+      const candidate = new URL(`${publicUrl.protocol}//${host}`);
+      if (
+        !candidate.username &&
+        !candidate.password &&
+        candidate.pathname === "/" &&
+        !candidate.search &&
+        !candidate.hash &&
+        candidate.origin === publicUrl.origin
+      ) {
+        return publicUrl;
+      }
+    } catch {
+      // Try the next explicitly configured public URL.
+    }
+  }
+  return null;
+}
+
+function requestBaseUrl(req) {
+  return publicBaseUrlString(publicUrlForRequest(req));
+}
+
+function publicBaseUrlString(url) {
+  return url.toString().replace(/\/$/, "");
+}
+
 function baseUrl() {
-  return (PUBLIC_URL?.toString() ?? "http://localhost:4021").replace(/\/$/, "");
+  return PUBLIC_URL.toString().replace(/\/$/, "");
 }
 
 function openFrameHtml(options = {}) {
-  const root = baseUrl();
+  const root = options.publicBaseUrl ?? baseUrl();
   const frameUrl = `${root}/open-frame`;
   const imageUrl = `${root}/open-frame.svg`;
   const previewUrl = `${root}/#inspector`;

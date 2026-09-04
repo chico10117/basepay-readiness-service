@@ -136,8 +136,12 @@ retryability, optional delay, and request ID.
 The stateless Streamable HTTP endpoint is:
 
 ```text
-https://x402-wallet-readiness-service.vercel.app/mcp
+https://x402.chikocorp.com/mcp
 ```
+
+The previous Vercel origin remains an allowlisted compatibility alias, so
+clients that still call `https://x402-wallet-readiness-service.vercel.app/mcp`
+continue to receive challenges that name that Vercel resource.
 
 Discover tools without payment:
 

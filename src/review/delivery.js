@@ -42,7 +42,7 @@ export async function sendWebhook(delivery) {
     summary: delivery.result_json?.summary || null,
     result_url:
       delivery.result_json?.result_url ||
-      `${String(process.env.PUBLIC_URL || "https://x402-wallet-readiness-service.vercel.app").replace(/\/$/, "")}/api/x402/orders/${encodeURIComponent(delivery.order_id)}/result`,
+      `${String(process.env.PUBLIC_URL || "https://x402.chikocorp.com").replace(/\/$/, "")}/api/x402/orders/${encodeURIComponent(delivery.order_id)}/result`,
     completed_at: delivery.result_json?.completed_at || null,
   };
   const body = JSON.stringify(event);

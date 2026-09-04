@@ -30,7 +30,7 @@ sudo systemctl restart x402-review-worker.service
 Verify the exact release after the public proxy reaches the VPS:
 
 ```sh
-PUBLIC_URL=https://x402-wallet-readiness-service.vercel.app \
+PUBLIC_URL=https://x402.chikocorp.com \
 SERVICE_VERSION="$release_version" \
 GIT_COMMIT_SHA="$release_commit" \
 npm run verify:runtime
@@ -42,12 +42,17 @@ Set the same `SERVICE_VERSION`, `GIT_COMMIT_SHA`, and RFC 3339
 `DEPLOYED_AT` values in the production environment if Vercel runs the Node
 process. In the current rewrite topology, the VPS response headers and
 `/health` body remain authoritative. Do not put CDP secrets in
-`vercel.json`.
+`vercel.json`. Keep `PUBLIC_URL` set to `https://x402.chikocorp.com`, retain
+the Vercel host in `PUBLIC_URL_ALIASES`, and list exactly those two HTTPS
+origins in `MCP_ALLOWED_ORIGINS`; startup fails closed on any other identity
+origin. Browser CORS follows the same two-origin allowlist. If
+`/etc/x402-wallet-readiness/review-worker.env`
+defines `PUBLIC_URL`, update it to the canonical host as well.
 
 Run the no-payment public checks only after deployment:
 
 ```sh
-PUBLIC_URL=https://x402-wallet-readiness-service.vercel.app \
+PUBLIC_URL=https://x402.chikocorp.com \
 SERVICE_VERSION="$release_version" \
 GIT_COMMIT_SHA="$release_commit" \
 npm run smoke:public
@@ -113,7 +118,7 @@ After deploying the GET compatibility alias, verify a parameterized unpaid
 challenge without signing or paying:
 
 ```sh
-PUBLIC_URL=https://x402-wallet-readiness-service.vercel.app \
+PUBLIC_URL=https://x402.chikocorp.com \
 AUDIT_TARGET_URL=https://example.com/api/resource \
 node scripts/verify-discovery.js
 ```
@@ -137,12 +142,17 @@ Do not publish until the domain, repository ownership, and remote MCP endpoint
 are stable. This repository does not automate registry authentication or
 publication.
 
+The already-published `server.json` version `1.0.0` intentionally keeps its
+legacy Vercel remote. After the canonical runtime is publicly verified, update
+that remote to `https://x402.chikocorp.com/mcp`, bump the descriptor version,
+and publish the new immutable Registry version through the manual workflow.
+
 ## Rollback and Diagnosis
 
 Keep the previous application release available. Before rollback, compare:
 
 ```sh
-curl -sS https://x402-wallet-readiness-service.vercel.app/health
+curl -sS https://x402.chikocorp.com/health
 systemctl status x402-wallet-readiness.service --no-pager
 journalctl -u x402-wallet-readiness.service -n 100 --no-pager
 ```

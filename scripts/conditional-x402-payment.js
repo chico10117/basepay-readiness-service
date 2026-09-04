@@ -19,7 +19,7 @@ export const CONFIG = Object.freeze({
   amountAtomic: 2_000_000n,
   confirmations: 3n,
   endpoint:
-    "https://x402-wallet-readiness-service.vercel.app/api/readiness/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
+    "https://x402.chikocorp.com/api/readiness/0x820a7bf90d944bb26bfD9b62Ab172Fc3A0829cB9",
   walletPath:
     process.env.X402_TRIGGER_WALLET_PATH || resolve(homedir(), ".agentcash", "wallet.json"),
   statePath:
