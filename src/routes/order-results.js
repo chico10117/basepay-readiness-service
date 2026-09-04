@@ -3,11 +3,12 @@ import { getReviewOrder } from "../order-store.js";
 
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 60;
+const MAX_RATE_BUCKETS = 10_000;
 const rateBuckets = new Map();
 
 export function createOrderResultsRouter() {
   const router = express.Router();
-  router.use(rateLimitResultRequests);
+  router.use("/api/x402/orders", rateLimitResultRequests);
 
   router.get("/api/x402/orders/:orderId", async (req, res, next) => {
     try {
@@ -61,11 +62,14 @@ export function createOrderResultsRouter() {
 
 function rateLimitResultRequests(req, res, next) {
   const now = Date.now();
-  const key = req.ip || req.socket.remoteAddress || "unknown";
+  const key = req.socket.remoteAddress || "unknown";
   const current = rateBuckets.get(key);
   if (!current || now - current.startedAt >= RATE_WINDOW_MS) {
-    rateBuckets.set(key, { startedAt: now, count: 1 });
     pruneRateBuckets(now);
+    if (rateBuckets.size >= MAX_RATE_BUCKETS) {
+      rateBuckets.delete(rateBuckets.keys().next().value);
+    }
+    rateBuckets.set(key, { startedAt: now, count: 1 });
     return next();
   }
   current.count += 1;

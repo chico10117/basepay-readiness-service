@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import test from "node:test";
 
 import { validateDiscoveryExtension } from "@x402/extensions/bazaar";
@@ -38,6 +40,38 @@ const CONFIG = {
 };
 
 const LOOKUP_PUBLIC = async () => [{ address: "93.184.216.34", family: 4 }];
+const CANONICAL_PUBLIC_URL = "https://x402.chikocorp.com";
+const LEGACY_PUBLIC_URL = "https://x402-wallet-readiness-service.vercel.app";
+
+test("fails closed when public identity origins are misconfigured", () => {
+  const moduleUrl = new URL("../src/index.js", import.meta.url).href;
+  const exactOrigins = `${CANONICAL_PUBLIC_URL},${LEGACY_PUBLIC_URL}`;
+  const baseEnv = {
+    ...process.env,
+    PUBLIC_URL: CANONICAL_PUBLIC_URL,
+    PUBLIC_URL_ALIASES: LEGACY_PUBLIC_URL,
+    MCP_ALLOWED_ORIGINS: exactOrigins,
+  };
+  const invalidConfigurations = [
+    [{ PUBLIC_URL: LEGACY_PUBLIC_URL }, /PUBLIC_URL must remain/],
+    [{ PUBLIC_URL: "http://x402.chikocorp.com" }, /must use HTTPS/],
+    [{ PUBLIC_URL_ALIASES: "" }, /PUBLIC_URL_ALIASES must contain exactly/],
+    [{ PUBLIC_URL_ALIASES: `${LEGACY_PUBLIC_URL},https:\/\/other.example` },
+      /PUBLIC_URL_ALIASES must contain exactly/],
+    [{ MCP_ALLOWED_ORIGINS: `${exactOrigins},https:\/\/other.example` },
+      /MCP_ALLOWED_ORIGINS must contain exactly/],
+  ];
+
+  for (const [overrides, expectedError] of invalidConfigurations) {
+    const child = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", `await import(${JSON.stringify(moduleUrl)})`],
+      { encoding: "utf8", env: { ...baseEnv, ...overrides } },
+    );
+    assert.notEqual(child.status, 0, JSON.stringify(overrides));
+    assert.match(child.stderr, expectedError, JSON.stringify(overrides));
+  }
+});
 
 test("strictly validates preflight and remediation inputs", () => {
   assert.deepEqual(
@@ -462,6 +496,7 @@ test("health exposes release identity without payment or order secrets", async t
   assert.match(response.headers.get("x-request-id"), /^req_/);
   const health = await response.json();
   assert.equal(health.service, "x402-preflight");
+  assert.equal(health.publicUrl, CANONICAL_PUBLIC_URL);
   assert.equal(health.version, "1.0.0");
   assert.equal("payTo" in health, false);
   assert.equal(JSON.stringify(health).includes(CONFIG.payTo), false);
@@ -471,24 +506,345 @@ test("health exposes release identity without payment or order secrets", async t
   assert.equal((await agentCard.json()).error.code, "A2A_NOT_IMPLEMENTED");
 });
 
-test("free inspection errors include browser-agent CORS headers", async t => {
+test("order-result rate limiting does not consume unrelated API requests", async t => {
   const server = startServer(0);
   await new Promise(resolve => server.once("listening", resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  const response = await fetch(
-    `http://127.0.0.1:${server.address().port}/api/preflight/inspect`,
-    {
+  const root = `http://127.0.0.1:${server.address().port}`;
+
+  for (let index = 0; index < 65; index += 1) {
+    const response = await fetch(`${root}/health`);
+    assert.equal(response.status, 200, `health request ${index + 1}`);
+  }
+  assert.equal((await fetch(`${root}/manifest`)).status, 200);
+});
+
+test("spoofed forwarded IPs cannot bypass the order-result rate limit", async t => {
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const root = `http://127.0.0.1:${server.address().port}`;
+
+  for (let index = 0; index < 60; index += 1) {
+    const response = await fetch(`${root}/api/x402/orders/missing-order`, {
+      headers: { "x-forwarded-for": `198.51.100.${(index % 250) + 1}` },
+    });
+    assert.equal(response.status, 404, `order request ${index + 1}`);
+  }
+  const limited = await fetch(`${root}/api/x402/orders/missing-order`, {
+    headers: { "x-forwarded-for": "203.0.113.250" },
+  });
+  assert.equal(limited.status, 429);
+});
+
+test("canonicalizes discovery and HTTP/MCP challenges by an explicit host allowlist", async t => {
+  const nativeFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/supported")) {
+      return jsonResponse({
+        kinds: [{ x402Version: 2, scheme: "exact", network: CONFIG.network }],
+        extensions: ["bazaar"],
+        signers: {},
+      });
+    }
+    return nativeFetch(url, init);
+  };
+  t.after(() => {
+    globalThis.fetch = nativeFetch;
+  });
+
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const root = `http://127.0.0.1:${server.address().port}`;
+  const aliases = [
+    [new URL(CANONICAL_PUBLIC_URL).host, CANONICAL_PUBLIC_URL],
+    [new URL(LEGACY_PUBLIC_URL).host, LEGACY_PUBLIC_URL],
+    ["untrusted.example", CANONICAL_PUBLIC_URL],
+    ["evil.example@x402-wallet-readiness-service.vercel.app", CANONICAL_PUBLIC_URL],
+  ];
+
+  for (const [host, expectedBaseUrl] of aliases) {
+    const manifestResponse = await fetchWithHost(root, "/manifest", host);
+    assert.equal(manifestResponse.status, 200, host);
+    const manifest = await manifestResponse.json();
+    assert.equal(manifest.interfaces.mcp, `${expectedBaseUrl}/mcp`, host);
+
+    const openapiResponse = await fetchWithHost(root, "/openapi.json", host);
+    assert.equal(openapiResponse.status, 200, host);
+    assert.equal((await openapiResponse.json()).servers[0].url, expectedBaseUrl, host);
+
+    const x402Response = await fetchWithHost(root, "/.well-known/x402.json", host);
+    assert.equal(x402Response.status, 200, host);
+    assert.equal((await x402Response.json()).homepage, expectedBaseUrl, host);
+
+    const healthResponse = await fetchWithHost(root, "/health", host);
+    assert.equal(healthResponse.status, 200, host);
+    assert.equal((await healthResponse.json()).publicUrl, expectedBaseUrl, host);
+
+    const previewResponse = await fetchWithHost(root, "/api/800402/preview", host);
+    assert.equal(previewResponse.status, 200, host);
+    const preview = await previewResponse.json();
+    assert.equal(preview.agent.agentUri, `${expectedBaseUrl}/.well-known/agent.json`, host);
+    assert.equal(
+      preview.endpoints.paidReadiness,
+      `${expectedBaseUrl}/api/readiness/${CONFIG.payTo}`,
+      host,
+    );
+
+    const legacyCardResponse = await fetchWithHost(
+      root,
+      "/labs/legacy-agent-card.json",
+      host,
+    );
+    assert.equal(legacyCardResponse.status, 200, host);
+    const legacyCard = await legacyCardResponse.json();
+    assert.equal(legacyCard.url, expectedBaseUrl, host);
+    const paidCardCapability = legacyCard.capabilities.find(
+      capability => capability.name === "paid_top_crypto_price_snapshot_feed",
+    );
+    assert.equal(
+      paidCardCapability.payment.endpoint,
+      `${expectedBaseUrl}/api/x402/market/crypto-snapshot?limit=50`,
+      host,
+    );
+
+    const legacyAgentResponse = await fetchWithHost(
+      root,
+      "/labs/legacy-agent.json",
+      host,
+    );
+    assert.equal(legacyAgentResponse.status, 200, host);
+    const legacyAgent = await legacyAgentResponse.json();
+    assert.equal(legacyAgent.url, expectedBaseUrl, host);
+    assert.equal(
+      legacyAgent.erc8004.agentUri,
+      `${expectedBaseUrl}/.well-known/agent.json`,
+      host,
+    );
+    assert.equal(
+      legacyAgent.pyrimid.recommendationEndpoint,
+      `${expectedBaseUrl}/api/pyrimid/recommend?need=paid%20mcp%20tool&limit=3`,
+      host,
+    );
+
+    const the402Response = await fetchWithHost(
+      root,
+      "/.well-known/the402.json",
+      host,
+    );
+    assert.equal(the402Response.status, 200, host);
+    const the402 = await the402Response.json();
+    assert.equal(the402.webhook_url, `${expectedBaseUrl}/api/the402/webhook`, host);
+    assert.equal(
+      the402.services.find(service => service.name === "Base USDC x402 Quick Review")
+        .purchase_url,
+      `${expectedBaseUrl}/api/x402/services/quick-review`,
+      host,
+    );
+
+    const tools402Response = await fetchWithHost(
+      root,
+      "/api/tools402/services/quick-review?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Check%20the%20x402%20challenge",
+      host,
+    );
+    assert.equal(tools402Response.status, 200, host);
+    const tools402 = await tools402Response.json();
+    assert.equal(tools402.provider.publicServiceUrl, expectedBaseUrl, host);
+    assert.equal(
+      tools402.provider.tools402Upstream,
+      `${expectedBaseUrl}/api/tools402/services/quick-review`,
+      host,
+    );
+
+    const openFrameResponse = await fetchWithHost(root, "/open-frame", host);
+    assert.equal(openFrameResponse.status, 200, host);
+    assert.match(
+      await openFrameResponse.text(),
+      new RegExp(`content="${escapeRegExp(expectedBaseUrl)}/open-frame"`),
+      host,
+    );
+
+    const auditResponse = await fetchWithHost(root, "/api/x402/preflight/audit", host, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        resource_url: "https://93.184.216.34/resource",
+        method: "GET",
+        expected_network: CONFIG.network,
+        max_price_usd: 1,
+      }),
+    });
+    assert.equal(auditResponse.status, 402, host);
+    const auditChallenge = decodePaymentRequired(auditResponse);
+    assert.equal(
+      auditChallenge.resource.url,
+      `${expectedBaseUrl}/api/x402/preflight/audit`,
+      host,
+    );
+
+    const triageResponse = await fetchWithHost(
+      root,
+      "/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Check%20the%20x402%20challenge",
+      host,
+      { headers: { accept: "application/json" } },
+    );
+    assert.equal(triageResponse.status, 402, host);
+    const triageChallenge = decodePaymentRequired(triageResponse);
+    assert.equal(
+      triageChallenge.extensions.bazaar.info.output.example.review.statusUrl,
+      `${expectedBaseUrl}/api/x402/orders/triage-example`,
+      host,
+    );
+
+    const mcpResponse = await fetchWithHost(root, "/mcp", host, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+        "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 10,
+        method: "tools/call",
+        params: {
+          name: "audit_x402_endpoint",
+          arguments: {
+            resource_url: "https://93.184.216.34/resource",
+            method: "GET",
+            expected_network: CONFIG.network,
+            max_price_usd: 1,
+          },
+        },
+      }),
+    });
+    assert.equal(mcpResponse.status, 402, host);
+    const mcpChallenge = decodePaymentRequired(mcpResponse);
+    assert.equal(
+      mcpChallenge.resource.url,
+      `${expectedBaseUrl}/mcp#audit_x402_endpoint`,
+      host,
+    );
+  }
+
+  for (const [host, forwardedHost, expectedBaseUrl] of [
+    [CANONICAL_PUBLIC_URL, LEGACY_PUBLIC_URL, CANONICAL_PUBLIC_URL],
+    [LEGACY_PUBLIC_URL, CANONICAL_PUBLIC_URL, LEGACY_PUBLIC_URL],
+  ]) {
+    const response = await getJsonWithHostHeaders(root, "/manifest", {
+      host: new URL(host).host,
+      forwardedHost: new URL(forwardedHost).host,
+    });
+    assert.equal(response.status, 200, `${host} before ${forwardedHost}`);
+    assert.equal(
+      response.body.interfaces.mcp,
+      `${expectedBaseUrl}/mcp`,
+      `${host} before ${forwardedHost}`,
+    );
+  }
+
+  const ambiguousForwardedHost = await getJsonWithHostHeaders(root, "/manifest", {
+    host: "internal.example",
+    forwardedHost:
+      `evil.example, ${new URL(LEGACY_PUBLIC_URL).host}`,
+  });
+  assert.equal(ambiguousForwardedHost.status, 200);
+  assert.equal(
+    ambiguousForwardedHost.body.interfaces.mcp,
+    `${CANONICAL_PUBLIC_URL}/mcp`,
+  );
+
+  const varied = await fetchWithHost(
+    root,
+    "/manifest",
+    new URL(LEGACY_PUBLIC_URL).host,
+  );
+  assert.match(varied.headers.get("vary") ?? "", /x-forwarded-host/i);
+});
+
+test("MCP allows both public origins and rejects an unknown origin", async t => {
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const root = `http://127.0.0.1:${server.address().port}`;
+  const body = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/list",
+    params: {},
+  });
+  const headers = {
+    accept: "application/json, text/event-stream",
+    "content-type": "application/json",
+    "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+  };
+
+  for (const origin of [CANONICAL_PUBLIC_URL, LEGACY_PUBLIC_URL]) {
+    const response = await fetchWithHost(root, "/mcp", "untrusted.example", {
+      method: "POST",
+      headers: { ...headers, origin },
+      body,
+    });
+    assert.equal(response.status, 200, origin);
+  }
+
+  const rejected = await fetchWithHost(root, "/mcp", "untrusted.example", {
+    method: "POST",
+    headers: { ...headers, origin: "https://evil.example" },
+    body,
+  });
+  assert.equal(rejected.status, 403);
+});
+
+test("browser CORS allows only the two public origins and fixed request headers", async t => {
+  const server = startServer(0);
+  await new Promise(resolve => server.once("listening", resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const root = `http://127.0.0.1:${server.address().port}`;
+
+  for (const origin of [CANONICAL_PUBLIC_URL, LEGACY_PUBLIC_URL]) {
+    const response = await fetch(`${root}/api/preflight/inspect`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        origin: "https://agent.example",
+        origin,
       },
       body: JSON.stringify({ resource_url: "https://127.0.0.1/private" }),
+    });
+    assert.equal(response.status, 400, origin);
+    assert.equal(response.headers.get("access-control-allow-origin"), origin);
+    assert.match(response.headers.get("access-control-expose-headers"), /payment-required/i);
+  }
+
+  const preflight = await fetch(`${root}/api/preflight/inspect`, {
+    method: "OPTIONS",
+    headers: {
+      origin: CANONICAL_PUBLIC_URL,
+      "access-control-request-method": "POST",
+      "access-control-request-headers": "content-type, x-secret-header",
     },
+  });
+  assert.equal(preflight.status, 204);
+  assert.match(preflight.headers.get("access-control-allow-headers") ?? "", /content-type/i);
+  assert.doesNotMatch(
+    preflight.headers.get("access-control-allow-headers") ?? "",
+    /x-secret-header/i,
   );
-  assert.equal(response.status, 400);
-  assert.equal(response.headers.get("access-control-allow-origin"), "https://agent.example");
-  assert.match(response.headers.get("access-control-expose-headers"), /payment-required/i);
+
+  for (const path of ["/api/preflight/inspect", "/api/x402/preflight/audit"]) {
+    const rejected = await fetch(`${root}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://evil.example",
+      },
+      body: JSON.stringify({ resource_url: "https://93.184.216.34/resource" }),
+    });
+    assert.equal(rejected.status, 403, path);
+    assert.equal(rejected.headers.get("access-control-allow-origin"), null, path);
+    assert.equal(rejected.headers.get("payment-required"), null, path);
+  }
 });
 
 test("blocked audit targets fail before facilitator initialization", async t => {
@@ -1066,5 +1422,53 @@ function jsonResponse(value) {
   return new Response(JSON.stringify(value), {
     status: 200,
     headers: { "content-type": "application/json" },
+  });
+}
+
+async function fetchWithHost(root, path, host, init = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("x-forwarded-host", host);
+  return fetch(`${root}${path}`, { ...init, headers });
+}
+
+function decodePaymentRequired(response) {
+  const encoded = response.headers.get("payment-required");
+  assert.ok(encoded, "payment-required header is present");
+  return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getJsonWithHostHeaders(root, path, { host, forwardedHost }) {
+  const url = new URL(path, root);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      protocol: url.protocol,
+      hostname: url.hostname,
+      port: url.port,
+      path: `${url.pathname}${url.search}`,
+      method: "GET",
+      headers: {
+        host,
+        "x-forwarded-host": forwardedHost,
+      },
+    }, response => {
+      const chunks = [];
+      response.on("data", chunk => chunks.push(chunk));
+      response.on("end", () => {
+        try {
+          resolve({
+            status: response.statusCode,
+            body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+          });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    request.on("error", reject);
+    request.end();
   });
 }

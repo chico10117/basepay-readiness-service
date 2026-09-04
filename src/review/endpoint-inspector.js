@@ -6,7 +6,7 @@ import {
   TargetAccessError,
 } from "./target-policy.js";
 
-const ORIGIN = process.env.REVIEW_PROBE_ORIGIN ?? "https://x402-wallet-readiness-service.vercel.app";
+const ORIGIN = process.env.REVIEW_PROBE_ORIGIN ?? "https://x402.chikocorp.com";
 
 export async function inspectEndpoint(target) {
   const probes = [];
