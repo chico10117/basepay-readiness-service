@@ -12,7 +12,7 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 const DEFAULT_MAX_BYTES = 256 * 1024;
 const DEFAULT_MAX_REDIRECTS = 3;
 const DEFAULT_TTL_SECONDS = 15 * 60;
-const DEFAULT_PROBE_ORIGIN = "https://x402-preflight.dev";
+const DEFAULT_PROBE_ORIGIN = "https://x402.chikocorp.com";
 const PAYMENT_HEADER_NAMES = [
   "payment-signature",
   "x-payment",

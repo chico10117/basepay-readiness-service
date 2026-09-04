@@ -66,7 +66,7 @@ if (!challenge.payment.detected || challenge.payment.network !== network) {
 const cors = await request("/api/x402/preflight/audit", {
   method: "OPTIONS",
   headers: {
-    origin: "https://agent.example",
+    origin: new URL(publicUrl).origin,
     "access-control-request-method": "POST",
     "access-control-request-headers": "content-type,payment-signature",
   },
@@ -79,6 +79,21 @@ if (!/payment-required|payment-response/i.test(
   cors.headers.get("access-control-expose-headers") ?? "",
 )) {
   throw new Error("audit CORS does not expose x402 response headers");
+}
+
+const rejectedCors = await request("/api/x402/preflight/audit", {
+  method: "OPTIONS",
+  headers: {
+    origin: "https://evil.example",
+    "access-control-request-method": "POST",
+    "access-control-request-headers": "content-type,payment-signature",
+  },
+});
+if (rejectedCors.status !== 403) {
+  throw new Error(`audit rejected-origin OPTIONS returned HTTP ${rejectedCors.status}`);
+}
+if (rejectedCors.headers.has("access-control-allow-origin")) {
+  throw new Error("audit reflected a rejected CORS origin");
 }
 
 console.log(JSON.stringify({
