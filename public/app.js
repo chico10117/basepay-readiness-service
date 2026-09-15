@@ -11,6 +11,10 @@ const paidAuditUrl = document.querySelector("#paid-audit-url");
 const paidAuditLink = document.querySelector("#paid-audit-link");
 const paidAuditNote = document.querySelector("#paid-audit-note");
 const copyPaidAuditButton = document.querySelector("#copy-paid-audit");
+const quickReviewUrl = document.querySelector("#quick-review-url");
+const quickReviewLink = document.querySelector("#quick-review-link");
+const integrationTriageUrl = document.querySelector("#integration-triage-url");
+const integrationTriageLink = document.querySelector("#integration-triage-link");
 const defaultResourceUrl = "https://example.com/api/resource";
 
 if (mcpEndpoint) mcpEndpoint.textContent = new URL("/mcp", window.location.origin).toString();
@@ -123,6 +127,7 @@ function updatePaidAuditHandoff() {
 
   const method = String(methodInput?.value ?? "GET").trim().toUpperCase();
   const queryUrl = ["GET", "HEAD"].includes(method) ? buildPaidAuditQueryUrl(method) : null;
+  updateServiceRoutes();
 
   if (!queryUrl) {
     paidAuditUrl.textContent = new URL("/api/x402/preflight/audit", window.location.origin).toString();
@@ -138,6 +143,33 @@ function updatePaidAuditHandoff() {
   paidAuditLink.removeAttribute("aria-disabled");
   paidAuditLink.tabIndex = 0;
   paidAuditNote.textContent = "Opening this URL returns an x402 challenge until a compatible client supplies payment.";
+}
+
+function updateServiceRoutes() {
+  const quickUrl = buildServiceRouteUrl(
+    "/api/x402/services/quick-review",
+    "Verify the x402 payment challenge and identify the next patch.",
+  );
+  const triageUrl = buildServiceRouteUrl(
+    "/api/x402/services/integration-triage",
+    "Make the x402 Base USDC endpoint browser-agent readable.",
+  );
+
+  setLinkedCode(quickReviewUrl, quickReviewLink, quickUrl);
+  setLinkedCode(integrationTriageUrl, integrationTriageLink, triageUrl);
+}
+
+function buildServiceRouteUrl(path, goal) {
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set("repository_or_url", resourceUrlInput?.value?.trim() || defaultResourceUrl);
+  url.searchParams.set("goal", goal);
+  url.searchParams.set("response_format", "both");
+  return url.toString();
+}
+
+function setLinkedCode(codeElement, linkElement, value) {
+  if (codeElement) codeElement.textContent = value;
+  if (linkElement) linkElement.href = value;
 }
 
 function buildPaidAuditQueryUrl(method) {
