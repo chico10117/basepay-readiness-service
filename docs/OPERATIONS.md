@@ -76,7 +76,9 @@ psql "$ORDER_DATABASE_URL" \
 remediation requires it to be configured and healthy. The service returns
 `REMEDIATION_UNAVAILABLE` before presenting a payment challenge otherwise.
 Set `ORDER_STORE_REQUIRED=true` in production deployments that promise the
-remediation capability.
+remediation capability. The API unit defines `REVIEW_WORKER_ENABLED=true`
+directly so `/health` can verify the worker heartbeat without loading the
+worker-only provider and webhook secrets from `review-worker.env`.
 
 Set a new high-entropy pepper only in the service environment:
 

@@ -17,6 +17,7 @@ Environment=X402_PRICE=$2
 Environment=X402_NETWORK=eip155:8453
 Environment=X402_FACILITATOR_URL=https://facilitator.world.fun
 Environment=SETTLEMENT_JOURNAL_DIR=/var/lib/x402-wallet-readiness/settlements
+Environment=REVIEW_WORKER_ENABLED=true
 EnvironmentFile=-/etc/x402-wallet-readiness/runtime.env
 EnvironmentFile=-/etc/x402-wallet-readiness/order-store.env
 StateDirectory=x402-wallet-readiness
