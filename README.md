@@ -37,6 +37,29 @@ manifest, and agent metadata. Existing wallet, market, weather, repository,
 marketplace, and helper routes remain available under the manifest's
 `labs` section.
 
+## Fixed-Price Service Routes
+
+The public inspector also generates direct GET intakes for buyers who want a
+human readback after payment settles. They are ordinary x402 resources, not
+additional MCP tools:
+
+| Route | Price | Use |
+| --- | ---: | --- |
+| `GET /api/x402/services/quick-review` | `$50` | Focused challenge readback, blockers, proof commands, and next patch. |
+| `GET /api/x402/services/integration-triage` | `$100` | Same-day endpoint, marketplace, webhook, or receipt-verifier triage. |
+
+Each route requires `repository_or_url` and `goal` query parameters before it
+serves an x402 challenge. Optional `contact`, `constraints`, `callback_url`,
+`response_format`, and `language` parameters can travel with the paid intake.
+
+Example payable URLs:
+
+```text
+https://x402.chikocorp.com/api/x402/services/quick-review?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Verify%20the%20x402%20payment%20challenge%20and%20identify%20the%20next%20patch&response_format=both
+
+https://x402.chikocorp.com/api/x402/services/integration-triage?repository_or_url=https%3A%2F%2Fgithub.com%2Fexample%2Fproject&goal=Make%20the%20x402%20Base%20USDC%20endpoint%20browser-agent%20readable&response_format=both
+```
+
 ## Bitcoin Lightning / L402 Seller
 
 The service also contains a gateway-only repository opportunity scanner for
