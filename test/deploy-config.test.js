@@ -29,3 +29,21 @@ test("Glama Dockerfile uses a production Node runtime and /ping healthcheck", as
   assert.match(dockerignore, /^node_modules\/$/m);
   assert.match(dockerignore, /^state\/$/m);
 });
+
+test("public inspector exposes the paid audit handoff URL generator", async () => {
+  const [html, app] = await Promise.all([
+    readFile("public/index.html", "utf8"),
+    readFile("public/app.js", "utf8"),
+  ]);
+
+  assert.match(html, /id="paid-handoff-title"/);
+  assert.match(html, /id="paid-audit-url"/);
+  assert.match(html, /id="paid-audit-link"/);
+  assert.match(html, /id="copy-paid-audit"/);
+  assert.match(html, /POST \/api\/x402\/preflight\/audit/);
+  assert.match(app, /defaultResourceUrl = "https:\/\/example\.com\/api\/resource"/);
+  assert.match(app, /resourceUrlInput\?\.value\?\.trim\(\) \|\| defaultResourceUrl/);
+  assert.match(app, /new URL\("\/api\/x402\/preflight\/audit", window\.location\.origin\)/);
+  assert.match(app, /searchParams\.set\("resource_url"/);
+  assert.match(app, /\["GET", "HEAD"\]\.includes\(method\)/);
+});

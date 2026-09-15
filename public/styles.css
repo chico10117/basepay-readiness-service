@@ -555,6 +555,90 @@ input:invalid:not(:placeholder-shown) {
   white-space: nowrap;
 }
 
+.paid-handoff {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.44fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: stretch;
+  margin-top: var(--space-5);
+  border: 1px solid var(--line-strong);
+  background: var(--paper-raised);
+}
+
+.handoff-copy,
+.handoff-panel {
+  min-width: 0;
+  padding: var(--space-5);
+}
+
+.handoff-copy {
+  border-right: 1px solid var(--line-strong);
+}
+
+.handoff-copy h3 {
+  max-width: 20ch;
+  margin: 0;
+  font-size: var(--step-1);
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+}
+
+.handoff-copy p:last-child,
+.handoff-note {
+  margin: var(--space-3) 0 0;
+  color: var(--muted);
+}
+
+.handoff-note {
+  max-width: 66ch;
+}
+
+.handoff-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.handoff-route {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.handoff-route span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.handoff-route code {
+  display: block;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--cobalt);
+  font-family: var(--font-mono);
+  font-size: var(--step--1);
+  overflow-wrap: anywhere;
+}
+
+.handoff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.56;
+  box-shadow: none;
+  transform: none;
+}
+
 .report-console {
   margin-top: var(--space-5);
   border: 1px solid var(--ink);
@@ -1444,6 +1528,15 @@ footer {
     align-items: flex-start;
   }
 
+  .paid-handoff {
+    grid-template-columns: 1fr;
+  }
+
+  .handoff-copy {
+    border-right: 0;
+    border-bottom: 1px solid var(--line-strong);
+  }
+
   .flight-plan li {
     grid-template-columns: 40px minmax(0, 1fr);
     gap: var(--space-3);
@@ -1533,6 +1626,10 @@ footer {
   .field-url,
   .submit-button {
     grid-column: auto;
+  }
+
+  .handoff-route {
+    grid-template-columns: 1fr;
   }
 
   .scope-ledger {

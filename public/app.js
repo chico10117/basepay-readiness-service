@@ -3,8 +3,41 @@ const output = document.querySelector("#output");
 const statusOutput = document.querySelector("#status");
 const submitButton = form?.querySelector('button[type="submit"]');
 const mcpEndpoint = document.querySelector("#mcp-endpoint");
+const resourceUrlInput = document.querySelector("#resource-url");
+const methodInput = document.querySelector("#request-method");
+const expectedNetworkInput = document.querySelector("#expected-network");
+const maxPriceInput = document.querySelector("#max-price");
+const paidAuditUrl = document.querySelector("#paid-audit-url");
+const paidAuditLink = document.querySelector("#paid-audit-link");
+const paidAuditNote = document.querySelector("#paid-audit-note");
+const copyPaidAuditButton = document.querySelector("#copy-paid-audit");
+const defaultResourceUrl = "https://example.com/api/resource";
 
 if (mcpEndpoint) mcpEndpoint.textContent = new URL("/mcp", window.location.origin).toString();
+
+for (const field of [resourceUrlInput, methodInput, expectedNetworkInput, maxPriceInput]) {
+  field?.addEventListener("input", updatePaidAuditHandoff);
+  field?.addEventListener("change", updatePaidAuditHandoff);
+}
+
+copyPaidAuditButton?.addEventListener("click", async () => {
+  const value = paidAuditUrl?.textContent?.trim();
+  if (!value) return;
+
+  const originalLabel = copyPaidAuditButton.textContent.trim();
+  try {
+    await copyText(value);
+    copyPaidAuditButton.textContent = "Copied";
+  } catch {
+    copyPaidAuditButton.textContent = "Copy failed";
+  } finally {
+    window.setTimeout(() => {
+      copyPaidAuditButton.textContent = originalLabel;
+    }, 1600);
+  }
+});
+
+updatePaidAuditHandoff();
 
 form?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -83,4 +116,61 @@ class InspectionError extends Error {
     super(message);
     this.payload = payload;
   }
+}
+
+function updatePaidAuditHandoff() {
+  if (!paidAuditUrl || !paidAuditLink || !paidAuditNote) return;
+
+  const method = String(methodInput?.value ?? "GET").trim().toUpperCase();
+  const queryUrl = ["GET", "HEAD"].includes(method) ? buildPaidAuditQueryUrl(method) : null;
+
+  if (!queryUrl) {
+    paidAuditUrl.textContent = new URL("/api/x402/preflight/audit", window.location.origin).toString();
+    paidAuditLink.removeAttribute("href");
+    paidAuditLink.setAttribute("aria-disabled", "true");
+    paidAuditLink.tabIndex = -1;
+    paidAuditNote.textContent = "POST targets use the canonical JSON endpoint. The GET alias only audits GET and HEAD targets.";
+    return;
+  }
+
+  paidAuditUrl.textContent = queryUrl;
+  paidAuditLink.href = queryUrl;
+  paidAuditLink.removeAttribute("aria-disabled");
+  paidAuditLink.tabIndex = 0;
+  paidAuditNote.textContent = "Opening this URL returns an x402 challenge until a compatible client supplies payment.";
+}
+
+function buildPaidAuditQueryUrl(method) {
+  const url = new URL("/api/x402/preflight/audit", window.location.origin);
+  const resourceUrl = resourceUrlInput?.value?.trim() || defaultResourceUrl;
+  const expectedNetwork = expectedNetworkInput?.value?.trim();
+  const maxPriceValue = maxPriceInput?.value?.trim();
+  const maxPrice = Number(maxPriceValue);
+
+  url.searchParams.set("resource_url", resourceUrl);
+  url.searchParams.set("method", method);
+  if (expectedNetwork) url.searchParams.set("expected_network", expectedNetwork);
+  if (maxPriceValue && Number.isFinite(maxPrice)) {
+    url.searchParams.set("max_price_usd", String(maxPrice));
+  }
+
+  return url.toString();
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const helper = document.createElement("textarea");
+  helper.value = value;
+  helper.setAttribute("readonly", "");
+  helper.style.position = "fixed";
+  helper.style.top = "-999px";
+  document.body.append(helper);
+  helper.select();
+  const copied = document.execCommand("copy");
+  helper.remove();
+  if (!copied) throw new Error("copy command failed");
 }
