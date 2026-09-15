@@ -216,8 +216,10 @@ cookies, payment signatures, or confidential repository URLs.
 
 `GET /health` reports the public service version, commit, deployment time,
 network, facilitator mode, database availability, worker heartbeat, and
-settlement reconciler status. It does not expose wallets, orders, transaction
-hashes, URLs, secrets, or filesystem paths. Every response includes:
+settlement reconciler status. `GET /ping` returns the same non-secret payload
+for deployment health checks that require that route. Neither endpoint exposes
+wallets, orders, transaction hashes, URLs, secrets, or filesystem paths. Every
+response includes:
 
 ```text
 X-Service-Version

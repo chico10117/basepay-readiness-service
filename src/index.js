@@ -341,6 +341,7 @@ const serviceInfo = {
   endpoints: {
     free: [
       "GET /health",
+      "GET /ping",
       "GET /manifest",
       "GET /openapi.json",
       "GET /.well-known/agent-card.json",
@@ -502,7 +503,7 @@ const serviceInfo = {
   },
 };
 
-app.get("/health", async (req, res) => {
+app.get(["/health", "/ping"], async (req, res) => {
   let settlementReconciler;
   try {
     settlementReconciler = {
