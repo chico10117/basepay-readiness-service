@@ -599,6 +599,14 @@ test("canonicalizes discovery and HTTP/MCP challenges by an explicit host allowl
     assert.equal(healthResponse.status, 200, host);
     assert.equal((await healthResponse.json()).publicUrl, expectedBaseUrl, host);
 
+    const pingResponse = await fetchWithHost(root, "/ping", host);
+    assert.equal(pingResponse.status, 200, host);
+    const ping = await pingResponse.json();
+    assert.equal(ping.status, "ok", host);
+    assert.equal(ping.publicUrl, expectedBaseUrl, host);
+    assert.equal("payTo" in ping, false, host);
+    assert.equal(JSON.stringify(ping).includes(CONFIG.payTo), false, host);
+
     const previewResponse = await fetchWithHost(root, "/api/800402/preview", host);
     assert.equal(previewResponse.status, 200, host);
     const preview = await previewResponse.json();
