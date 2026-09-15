@@ -157,6 +157,37 @@
           </button>
         </form>
 
+        <section class="paid-handoff" aria-labelledby="paid-handoff-title">
+          <div class="handoff-copy">
+            <p class="console-label">Paid handoff</p>
+            <h3 id="paid-handoff-title">$0.05 audit challenge from this target</h3>
+            <p>
+              The canonical paid audit is the POST capability. The generated GET
+              alias gives bodyless x402 clients a direct challenge URL for GET
+              and HEAD targets.
+            </p>
+          </div>
+          <div class="handoff-panel">
+            <div class="handoff-route">
+              <span>Canonical</span>
+              <code>POST /api/x402/preflight/audit</code>
+            </div>
+            <div class="handoff-route">
+              <span>GET alias</span>
+              <code id="paid-audit-url" aria-live="polite"></code>
+            </div>
+            <p class="handoff-note" id="paid-audit-note"></p>
+            <div class="handoff-actions">
+              <a class="button button-primary" id="paid-audit-link" href="/api/x402/preflight/audit">
+                Open x402 challenge
+              </a>
+              <button class="button button-quiet" id="copy-paid-audit" type="button">
+                Copy URL
+              </button>
+            </div>
+          </div>
+        </section>
+
         <section class="report-console" aria-labelledby="report-title">
           <header>
             <div>
